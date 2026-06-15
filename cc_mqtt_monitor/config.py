@@ -23,12 +23,14 @@ except ImportError:  # pragma: no cover - surfaced to the user at runtime
 @dataclass
 class BrokerConfig:
     host: str = "mqtt.contrailcast.com"
-    # TLS on 8883 is the default; for local testing or a broker without TLS yet,
-    # set tls: false and port: 1883.
-    port: int = 8883
+    # Plaintext 1883 by default: the health feed carries non-sensitive, world-
+    # readable telemetry and uses no credentials, so TLS would add a cert-expiry
+    # outage mode without protecting anything. Turn TLS on (tls: true, port:
+    # 8883) only when you add authentication or transmit sensitive data.
+    port: int = 1883
     username: str = None
     password: str = None
-    tls: bool = True
+    tls: bool = False
     keepalive: int = 60
     client_id_prefix: str = "cc-rms-monitor"
 

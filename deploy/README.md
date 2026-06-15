@@ -1,11 +1,19 @@
 # Broker setup (mqtt.contrailcast.com)
 
 Hardened Mosquitto config for the open RMS health broker. Anonymous publishing
-stays frictionless; this adds a namespace ACL, resource limits, and TLS.
+stays frictionless; this adds a namespace ACL and resource limits.
 
 Files:
 - `mosquitto.conf` → `/etc/mosquitto/conf.d/contrailcast.conf`
 - `aclfile` → `/etc/mosquitto/aclfile`
+
+> **TLS is optional and off by default.** The health feed is non-sensitive and
+> world-readable, and the broker uses no credentials, so TLS would add a
+> cert-expiry outage mode without protecting anything. The `mosquitto.conf`
+> here includes a ready 8883 TLS listener and steps 1–2 below cover certbot —
+> but for the current open feed you can **skip the TLS listener and the certbot
+> steps** and run with the 1883 listener, ACL, and limits only. Enable TLS when
+> you add authentication or transmit sensitive data (precise location, PII).
 
 ## 1. Install Mosquitto + certbot
 

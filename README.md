@@ -100,8 +100,10 @@ Example `health` payload:
 curl -fsSL https://raw.githubusercontent.com/CroatianMeteorNetwork/CC_Utils/master/MQTT_monitor/scripts/deploy_station.sh | bash
 ```
 
-It defaults to `mqtt.contrailcast.com:8883` over TLS with **no credentials** —
-nothing for the operator to configure. Override the repo with
+It defaults to `mqtt.contrailcast.com:1883` (plaintext) with **no credentials** —
+nothing for the operator to configure. The health feed is non-sensitive and
+world-readable by design, so TLS is opt-in (see `deploy/README.md`); enable it
+only alongside authentication. Override the repo with
 `CC_REPO_URL=… bash deploy_station.sh` if you fork it.
 
 For a manual/dev install:
