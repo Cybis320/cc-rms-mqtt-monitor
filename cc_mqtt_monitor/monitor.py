@@ -48,6 +48,8 @@ def run_once(config, publisher=None):
                  ("- " + "; ".join(state["problems"])) if state["problems"] else "")
         if publisher:
             publisher.publish_state(state)
+    if publisher:
+        publisher.flush()
     return host_state, states
 
 

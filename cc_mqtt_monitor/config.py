@@ -73,11 +73,14 @@ class Config:
     rms_dir: str = "~/source/RMS"
 
     # Topic layout. Plain state is published to "<topic_prefix>/<station>/health".
-    topic_prefix: str = "contrailcast/rms"
+    # The contrailcast broker ACL only permits the "stations/#" namespace, so
+    # everything (state, host status/LWT, and HA discovery) must live under it.
+    topic_prefix: str = "stations"
 
-    # Home Assistant MQTT Discovery.
+    # Home Assistant MQTT Discovery. Must stay inside the allowed namespace, so
+    # point HA's MQTT integration discovery prefix at this same value.
     ha_discovery_enabled: bool = True
-    ha_discovery_prefix: str = "homeassistant"
+    ha_discovery_prefix: str = "stations/homeassistant"
 
     interval_seconds: int = 60
     # Number of trailing log lines scanned per station per cycle.

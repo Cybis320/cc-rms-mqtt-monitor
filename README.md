@@ -54,11 +54,18 @@ host memory pressure.
 ## Health topics
 
 ```
-contrailcast/rms/<host>/status            retained "online"/"offline" (Last Will)
-contrailcast/rms/<host>/health            retained JSON host (OS) state blob
-contrailcast/rms/<station>/health         retained JSON per-station state blob
-homeassistant/<component>/<station>/<key>/config   retained HA discovery
+stations/<host>/status                         retained "online"/"offline" (Last Will)
+stations/<host>/health                          retained JSON host (OS) state blob
+stations/<station>/health                       retained JSON per-station state blob
+stations/homeassistant/<component>/<id>/<key>/config   retained HA discovery
 ```
+
+> **Broker namespace:** the contrailcast broker is an open, unauthenticated,
+> plaintext broker whose ACL only permits the `stations/#` topic tree. Every
+> topic — including the host status/Last-Will and the HA discovery configs —
+> therefore lives under `stations/`. For Home Assistant, set the MQTT
+> integration's discovery prefix to `stations/homeassistant` so it picks these
+> up. Set `ha_discovery_enabled: false` to skip publishing discovery configs.
 
 The host status topic is the MQTT **Last Will** target, so a crashed agent or
 offline host is detected without polling, and HA entities flip to "unavailable".

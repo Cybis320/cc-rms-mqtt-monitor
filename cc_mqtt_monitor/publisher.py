@@ -42,6 +42,7 @@ class Publisher:
         # Last Will: if we drop without a clean disconnect, broker marks us down.
         self.client.will_set(self.host_status_topic, "offline", qos=1, retain=True)
         self._discovery_sent = set()
+        self._pending = []
 
     def connect(self):
         self.client.connect(
@@ -50,7 +51,8 @@ class Publisher:
             keepalive=self.config.broker.keepalive,
         )
         self.client.loop_start()
-        self.client.publish(self.host_status_topic, "online", qos=1, retain=True)
+        self._publish(self.host_status_topic, "online")
+        self.flush()
 
     def _state_topic(self, station_id):
         return "%s/%s/health" % (self.config.topic_prefix, station_id)
@@ -58,10 +60,27 @@ class Publisher:
     def _host_state_topic(self):
         return "%s/%s/health" % (self.config.topic_prefix, self.config.host_name)
 
+    def _publish(self, topic, payload, retain=True):
+        """Publish QoS-1 and track the message so flush() can confirm delivery."""
+        info = self.client.publish(topic, payload, qos=1, retain=retain)
+        self._pending.append(info)
+        return info
+
+    def flush(self, timeout=10.0):
+        """Block until every queued message has actually been sent to the broker.
+
+        Essential for --once and clean shutdown: without it, loop_start()'s
+        background thread may be torn down before the QoS-1 messages leave.
+        """
+        for info in self._pending:
+            try:
+                info.wait_for_publish(timeout)
+            except (ValueError, RuntimeError):
+                pass
+        self._pending = []
+
     def _send_discovery(self, station_id):
-        if not self.config.ha_discovery_enabled:
-            return
-        if station_id in self._discovery_sent:
+        if not self.config.ha_discovery_enabled or station_id in self._discovery_sent:
             return
         for topic, payload in hadiscovery.discovery_messages(
             station_id,
@@ -69,13 +88,11 @@ class Publisher:
             self.host_status_topic,
             self.config.ha_discovery_prefix,
         ):
-            self.client.publish(topic, json.dumps(payload), qos=1, retain=True)
+            self._publish(topic, json.dumps(payload))
         self._discovery_sent.add(station_id)
 
     def _send_host_discovery(self):
-        if not self.config.ha_discovery_enabled:
-            return
-        if "__host__" in self._discovery_sent:
+        if not self.config.ha_discovery_enabled or "__host__" in self._discovery_sent:
             return
         for topic, payload in hadiscovery.host_discovery_messages(
             self.config.host_name,
@@ -83,30 +100,23 @@ class Publisher:
             self.host_status_topic,
             self.config.ha_discovery_prefix,
         ):
-            self.client.publish(topic, json.dumps(payload), qos=1, retain=True)
+            self._publish(topic, json.dumps(payload))
         self._discovery_sent.add("__host__")
 
     def publish_state(self, state):
         station_id = state["station_id"]
         self._send_discovery(station_id)
-        self.client.publish(
-            self._state_topic(station_id),
-            json.dumps(state, default=str),
-            qos=1,
-            retain=True,
-        )
+        self._publish(self._state_topic(station_id), json.dumps(state, default=str))
 
     def publish_host_state(self, state):
         self._send_host_discovery()
-        self.client.publish(
-            self._host_state_topic(),
-            json.dumps(state, default=str),
-            qos=1,
-            retain=True,
-        )
+        self._publish(self._host_state_topic(), json.dumps(state, default=str))
 
-    def disconnect(self):
-        # Clean shutdown: explicitly mark offline before closing.
-        self.client.publish(self.host_status_topic, "offline", qos=1, retain=True)
+    def disconnect(self, mark_offline=True):
+        # Flush queued state first, then (optionally) mark offline and confirm it.
+        self.flush()
+        if mark_offline:
+            self._publish(self.host_status_topic, "offline")
+            self.flush()
         self.client.loop_stop()
         self.client.disconnect()
