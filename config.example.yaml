@@ -4,10 +4,13 @@
 
 broker:
   host: mqtt.contrailcast.com
-  port: 1883
-  username: null          # broker is open today; fill in to lock it down later
+  port: 8883              # TLS port; use 1883 only for local/pre-TLS testing
+  username: null          # broker is open (anonymous); no credentials needed
   password: null
-  tls: false              # set true (and port 8883) when TLS is enabled
+  tls: true               # server-side TLS; verified against the system CA bundle
+  # If the broker's 8883/TLS listener is not up yet, set:
+  #   tls: false
+  #   port: 1883
   keepalive: 60
   client_id_prefix: cc-rms-monitor
 

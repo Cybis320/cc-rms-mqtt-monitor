@@ -22,11 +22,13 @@ except ImportError:  # pragma: no cover - surfaced to the user at runtime
 
 @dataclass
 class BrokerConfig:
-    host: str = "localhost"
-    port: int = 1883
+    host: str = "mqtt.contrailcast.com"
+    # TLS on 8883 is the default; for local testing or a broker without TLS yet,
+    # set tls: false and port: 1883.
+    port: int = 8883
     username: str = None
     password: str = None
-    tls: bool = False
+    tls: bool = True
     keepalive: int = 60
     client_id_prefix: str = "cc-rms-monitor"
 

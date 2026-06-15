@@ -1,0 +1,18 @@
+# ContrailCast RMS health broker -- ACL for anonymous clients.
+# Install to /etc/mosquitto/aclfile
+#
+# Lines with no preceding "user" apply to anonymous (un-authenticated) clients.
+#
+# DEV (current): broad read+write within the stations/ namespace -- keeps topic
+# layout flexible while the tool is still evolving.
+topic readwrite stations/#
+
+# LATER (zero-friction hardening, no passwords): have the tool connect with
+# username == its stationID (it already knows it), then switch to:
+#
+#   topic   read  stations/#
+#   pattern write stations/%u/#
+#
+# That confines each publisher to its own stations/<stationID>/... subtree and
+# stops accidental cross-station overwrites. (It does not stop a malicious actor
+# from claiming someone else's username -- that needs per-station secrets.)

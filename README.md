@@ -93,12 +93,28 @@ Example `health` payload:
 
 ## Install
 
+**One command on an RMS station** (clones, installs into `~/vRMS`, seeds
+`config.yaml`, installs + starts the hardened systemd service):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CroatianMeteorNetwork/CC_Utils/master/MQTT_monitor/scripts/deploy_station.sh | bash
+```
+
+It defaults to `mqtt.contrailcast.com:8883` over TLS with **no credentials** —
+nothing for the operator to configure. Override the repo with
+`CC_REPO_URL=… bash deploy_station.sh` if you fork it.
+
+For a manual/dev install:
+
 ```bash
 ./scripts/install.sh          # installs into ~/vRMS, creates config.yaml
 ```
 
-Then edit `config.yaml` (at minimum the broker host) — see
-`config.example.yaml` for every option.
+Edit `config.yaml` only if you need to change defaults (e.g. `tls: false` /
+`port: 1883` for a broker without TLS yet) — see `config.example.yaml`.
+
+**Broker operators:** see [`deploy/`](deploy/) for the hardened Mosquitto
+config (namespace ACL, resource limits, TLS via Let's Encrypt).
 
 ## Usage
 
