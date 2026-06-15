@@ -13,7 +13,8 @@
 set -euo pipefail
 
 # --- Settings (override via environment) ------------------------------------
-REPO_URL="${CC_REPO_URL:-https://github.com/CroatianMeteorNetwork/CC_Utils.git}"
+REPO_URL="${CC_REPO_URL:-https://github.com/Cybis320/cc-rms-mqtt-monitor.git}"
+# Deploys into the familiar CC_Utils/MQTT_monitor folder (repo name independent).
 DEST="${CC_DEST:-$HOME/source/CC_Utils/MQTT_monitor}"
 VENV="${CC_VENV:-$HOME/vRMS}"
 SERVICE_NAME="cc-rms-monitor"
@@ -32,18 +33,11 @@ elif [ -d "$DEST/.git" ]; then
     info "Updating existing checkout at $DEST"
     git -C "$DEST" pull --ff-only
 else
-    info "Cloning $REPO_URL"
+    info "Cloning $REPO_URL -> $DEST"
     mkdir -p "$(dirname "$DEST")"
-    # The project lives in the MQTT_monitor subdir of the CC_Utils repo.
-    tmp="$(mktemp -d)"
-    git clone --depth 1 "$REPO_URL" "$tmp"
-    if [ -d "$tmp/MQTT_monitor" ]; then
-        mkdir -p "$(dirname "$DEST")"
-        cp -r "$tmp/MQTT_monitor" "$DEST"
-    else
-        cp -r "$tmp" "$DEST"
-    fi
-    rm -rf "$tmp"
+    # Standalone repo: clone straight into DEST (which keeps the familiar
+    # CC_Utils/MQTT_monitor folder layout even though the repo is its own).
+    git clone --depth 1 "$REPO_URL" "$DEST"
 fi
 
 # --- 2. Python environment --------------------------------------------------

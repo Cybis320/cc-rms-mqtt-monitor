@@ -97,7 +97,7 @@ Example `health` payload:
 `config.yaml`, installs + starts the hardened systemd service):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CroatianMeteorNetwork/CC_Utils/master/MQTT_monitor/scripts/deploy_station.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-mqtt-monitor/master/scripts/deploy_station.sh | bash
 ```
 
 It defaults to `mqtt.contrailcast.com:1883` (plaintext) with **no credentials** —
