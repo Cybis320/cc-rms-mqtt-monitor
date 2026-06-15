@@ -89,16 +89,62 @@ WantedBy=multi-user.target
 EOF
 }
 
+# Auto-update timer: periodically git-pulls and restarts on change. Runs as
+# root (so it can restart the service); git/pip run as the repo owner.
+# Skip by setting CC_NO_AUTOUPDATE=1.
+render_update_service() {
+    cat <<EOF
+[Unit]
+Description=Auto-update CC RMS MQTT monitor from git
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=CC_DIR=${DEST}
+Environment=CC_USER=${RUN_USER}
+Environment=CC_VENV=${VENV}
+Environment=CC_SERVICE=${SERVICE_NAME}
+Environment=CC_BRANCH=${CC_BRANCH:-master}
+ExecStart=${DEST}/scripts/autoupdate.sh
+EOF
+}
+render_update_timer() {
+    cat <<EOF
+[Unit]
+Description=Periodically auto-update CC RMS MQTT monitor from git
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=${CC_UPDATE_INTERVAL:-15min}
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
 if command -v systemctl >/dev/null 2>&1; then
     if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
     info "Installing systemd service ($UNIT_PATH)"
     render_unit | $SUDO tee "$UNIT_PATH" >/dev/null
+    chmod +x "$DEST/scripts/autoupdate.sh" 2>/dev/null || true
+
+    if [ "${CC_NO_AUTOUPDATE:-0}" != "1" ]; then
+        info "Installing auto-update timer (${CC_UPDATE_INTERVAL:-15min})"
+        render_update_service | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}-update.service" >/dev/null
+        render_update_timer   | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}-update.timer"   >/dev/null
+    fi
+
     $SUDO systemctl daemon-reload
     $SUDO systemctl enable --now "$SERVICE_NAME"
+    [ "${CC_NO_AUTOUPDATE:-0}" != "1" ] && $SUDO systemctl enable --now "${SERVICE_NAME}-update.timer"
     info "Service started. Status:"
     $SUDO systemctl --no-pager --lines=0 status "$SERVICE_NAME" || true
     echo
     info "Follow logs with:  journalctl -u $SERVICE_NAME -f"
+    [ "${CC_NO_AUTOUPDATE:-0}" != "1" ] && info "Auto-update runs every ${CC_UPDATE_INTERVAL:-15min}; check: systemctl list-timers ${SERVICE_NAME}-update.timer"
 else
     warn "systemd not found; run manually:  $PY -m cc_mqtt_monitor --config $DEST/config.yaml"
 fi

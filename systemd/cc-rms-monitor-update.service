@@ -1,0 +1,14 @@
+[Unit]
+Description=Auto-update CC RMS MQTT monitor from git
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Adjust paths/user to match the install (deploy_station.sh renders these).
+Environment=CC_DIR=/home/ops/source/CC_Utils/MQTT_monitor
+Environment=CC_USER=ops
+Environment=CC_VENV=/home/ops/vRMS
+Environment=CC_SERVICE=cc-rms-monitor
+Environment=CC_BRANCH=master
+ExecStart=/home/ops/source/CC_Utils/MQTT_monitor/scripts/autoupdate.sh

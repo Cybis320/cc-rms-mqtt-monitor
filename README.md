@@ -118,6 +118,40 @@ Edit `config.yaml` only if you need to change defaults (e.g. `tls: false` /
 **Broker operators:** see [`deploy/`](deploy/) for the hardened Mosquitto
 config (namespace ACL, resource limits, TLS via Let's Encrypt).
 
+## Auto-update
+
+The installer also sets up a systemd timer that keeps each station current with
+the repo. Every 15 minutes it fast-forwards the checkout and, **only if the code
+changed**, reinstalls and restarts the service — so a `git push` rolls out to the
+fleet within minutes, with no inbound access needed (pull-based, NAT-friendly).
+
+- `scripts/autoupdate.sh` does `git fetch` + `merge --ff-only` (never clobbers
+  local commits), then `pip install -e` + `systemctl restart` if HEAD moved.
+- Runs as root from `cc-rms-monitor-update.timer` (so it can restart the
+  service); git/pip run as the repo owner.
+
+Knobs (env vars at install time):
+
+```bash
+CC_NO_AUTOUPDATE=1            # skip installing the timer
+CC_UPDATE_INTERVAL=30min     # change the poll interval
+CC_BRANCH=stable             # track a release branch instead of master
+```
+
+Check / control it:
+
+```bash
+systemctl list-timers cc-rms-monitor-update.timer
+journalctl -u cc-rms-monitor-update.service     # see what each run did
+sudo systemctl start cc-rms-monitor-update.service   # force an update now
+sudo systemctl disable --now cc-rms-monitor-update.timer  # stop auto-updates
+```
+
+> **Fleet-safety tip:** auto-updating every station to `master` means a bad push
+> hits everything. For a real fleet, develop on `master` but point stations at a
+> `stable` branch (`CC_BRANCH=stable`) and fast-forward `stable` only when you've
+> verified a change — same mechanism, controlled blast radius.
+
 ## Usage
 
 ```bash

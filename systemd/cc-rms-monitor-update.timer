@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically auto-update CC RMS MQTT monitor from git
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+# Spread fleet pulls out so they don't all hit GitHub at once.
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
