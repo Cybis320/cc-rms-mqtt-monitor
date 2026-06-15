@@ -12,5 +12,19 @@ ExecStart=/home/ops/vRMS/bin/python -m cc_mqtt_monitor --config /home/ops/source
 Restart=always
 RestartSec=10
 
+# --- OOM protection -------------------------------------------------------
+# Make the monitor one of the LAST processes the kernel OOM-killer chooses, so
+# it survives to report the event that killed an RMS process. systemd applies
+# this with privilege, so the negative value (which an unprivileged process
+# cannot set itself) takes effect.
+OOMScoreAdjust=-900
+
+# --- Small footprint / self-guard ----------------------------------------
+# The monitor itself is tiny (~30-40 MB). Cap it so a bug in the monitor can
+# never contribute to host memory pressure; if it ever exceeds this, only the
+# monitor is restarted -- RMS is untouched.
+MemoryMax=128M
+Nice=5
+
 [Install]
 WantedBy=multi-user.target

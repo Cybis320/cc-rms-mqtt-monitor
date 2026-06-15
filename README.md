@@ -21,7 +21,7 @@ Per station, each cycle (default 60 s):
 | Signal | What it catches |
 |---|---|
 | **Capture process alive** | `RMS.StartCapture` for that station's config is gone |
-| **Capture freshness** | newest `FF_*.fits` is stale while a session is active (hung capture) |
+| **Mode-aware freshness** | knows from `.config` (`continuous_capture`, `switch_camera_modes`, `save_frames`) + computed **sun elevation** whether to expect `FF_*.fits` (night) or `FramesFiles/*_d.jpg` frame images (day); flags the *right* output going stale and never false-alarms on the idle pipeline |
 | **Silent pipeline failure** | capturing fine but **no `FTPdetectinfo`/`CALSTARS`** produced — the general case of "a missing `.so` / import error broke detection but capture looks alive" |
 | **Fatal log errors** | scans the live log for `Traceback`, `ImportError`, `ModuleNotFoundError`, `cannot open shared object file`, `Segmentation fault`, etc., and reports the last one |
 | **Watchdog events** | RMS's own `WATCHDOG: ... died/stale/Restarting` lines |
@@ -34,11 +34,29 @@ Per station, each cycle (default 60 s):
 The combined verdict per station is `ok` / `degraded` / `error`, plus a
 human-readable `problems` list.
 
+### Host-level (OS) monitoring
+
+In addition to per-station health, each cycle publishes one **host** record:
+
+| Signal | What it catches |
+|---|---|
+| **OOM-killer events** | scans the kernel log (`journalctl -k` → `dmesg` → log files) for `Out of memory: Killed process` / `oom-kill:`, reports the count and last victim. A killed `python` (RMS) process is an `error`. |
+| **Memory headroom** | `MemAvailable` / `SwapFree` from `/proc/meminfo` — early warning before the OOM-killer fires |
+| **Uptime** | host uptime |
+
+The agent **protects itself from the OOM-killer** so it survives to report the
+event that kills an RMS process: the systemd unit sets `OOMScoreAdjust=-900`
+(applied with privilege), and the loop also best-effort lowers its own
+`oom_score_adj` at startup. It stays tiny (**~19 MB RSS**, pure stdlib + paho +
+pyyaml) and the unit caps it at `MemoryMax=128M` so it can never itself add to
+host memory pressure.
+
 ## Health topics
 
 ```
 contrailcast/rms/<host>/status            retained "online"/"offline" (Last Will)
-contrailcast/rms/<station>/health         retained JSON state blob
+contrailcast/rms/<host>/health            retained JSON host (OS) state blob
+contrailcast/rms/<station>/health         retained JSON per-station state blob
 homeassistant/<component>/<station>/<key>/config   retained HA discovery
 ```
 

@@ -38,24 +38,58 @@ def evaluate(metrics, thresholds):
         # If the process is down, downstream freshness checks are moot.
         return status, problems
 
-    # --- Capture freshness (only while a session is active) --------------
+    # --- What output should we expect right now? -------------------------
+    # FF compression runs at night (both modes). Frame images are saved during
+    # the day only in continuous mode, and at night whenever save_frames is on.
+    is_night = metrics.get("is_night")          # True/False, or None if unknown
+    continuous = metrics.get("continuous_capture")
+    save_frames = metrics.get("save_frames")
+    daynight_known = is_night is not None
+
+    expect_ff = is_night is True
+    expect_frames = bool(save_frames) and (continuous or is_night is True)
+
     session_age = metrics.get("capture_session_age_s")
+
+    # --- FF (night) capture freshness ------------------------------------
     fits_age = metrics.get("newest_fits_age_s")
-    session_active = (
-        session_age is not None and session_age <= thresholds.capture_active_window_s
-    )
-    if session_active and fits_age is not None:
+    if not daynight_known:
+        # No location: fall back to the activity-window heuristic.
+        session_active = (
+            session_age is not None
+            and session_age <= thresholds.capture_active_window_s
+        )
+        if session_active and fits_age is not None:
+            if fits_age >= thresholds.fits_fresh_error_s:
+                flag(ERROR, "Capture stalled: newest FITS is %.0fs old" % fits_age)
+            elif fits_age >= thresholds.fits_fresh_warn_s:
+                flag(DEGRADED, "Capture lagging: newest FITS is %.0fs old" % fits_age)
+    elif expect_ff and fits_age is not None:
         if fits_age >= thresholds.fits_fresh_error_s:
-            flag(ERROR, "Capture stalled: newest FITS is %.0fs old" % fits_age)
+            flag(ERROR, "Night capture stalled: newest FITS is %.0fs old" % fits_age)
         elif fits_age >= thresholds.fits_fresh_warn_s:
-            flag(DEGRADED, "Capture lagging: newest FITS is %.0fs old" % fits_age)
+            flag(DEGRADED, "Night capture lagging: newest FITS is %.0fs old" % fits_age)
+
+    # --- Frame-image (daytime / continuous) freshness --------------------
+    frame_age = metrics.get("newest_frame_age_s")
+    if expect_frames:
+        when = "day" if is_night is False else "night"
+        if frame_age is None:
+            flag(ERROR, "No frame images found but frame saving is expected (%s)" % when)
+        elif frame_age >= thresholds.frame_fresh_error_s:
+            flag(ERROR, "Frame saving stalled (%s): newest frame is %.0fs old"
+                 % (when, frame_age))
+        elif frame_age >= thresholds.frame_fresh_warn_s:
+            flag(DEGRADED, "Frame saving lagging (%s): newest frame is %.0fs old"
+                 % (when, frame_age))
 
     # --- Silent pipeline failure (the ".so missing" class) ---------------
-    # Frames are being written but no detection output has appeared after the
-    # grace period -> a stage (detection/calibration) is broken even though
-    # capture looks healthy.
+    # At night, frames are being captured but no detection output appears after
+    # the grace period -> a stage (detection/calibration) is broken even though
+    # capture looks healthy. Gated to night, when detection is expected to run.
+    night_for_detection = is_night is True or not daynight_known
     if (
-        session_active
+        night_for_detection
         and metrics.get("fits_count", 0) > 0
         and session_age is not None
         and session_age > thresholds.detection_grace_s
@@ -109,6 +143,44 @@ def evaluate(metrics, thresholds):
 def build_state(metrics, thresholds, host_name, timestamp):
     """Assemble the published JSON state for one station."""
     status, problems = evaluate(metrics, thresholds)
+    state = dict(metrics)
+    state["status"] = status
+    state["problems"] = problems
+    state["host"] = host_name
+    state["timestamp"] = timestamp
+    return state
+
+
+def evaluate_host(metrics, thresholds):
+    """Return (status, problems) for host-wide OS metrics (memory, OOM)."""
+    status = OK
+    problems = []
+
+    def flag(level, message):
+        nonlocal status
+        status = _worse(status, level)
+        problems.append(message)
+
+    # OOM-killer activity is always significant; killing a python (RMS) process
+    # is treated as an error, anything else as degraded.
+    if metrics.get("oom_kill_count"):
+        victim = metrics.get("last_oom_victim") or "?"
+        level = ERROR if "python" in str(victim).lower() else DEGRADED
+        flag(level, "OOM-killer fired %dx (last victim: %s)"
+             % (metrics["oom_kill_count"], victim))
+
+    avail = metrics.get("mem_available_mb")
+    if avail is not None:
+        if avail <= thresholds.mem_available_error_mb:
+            flag(ERROR, "Host memory critically low: %d MB available" % avail)
+        elif avail <= thresholds.mem_available_warn_mb:
+            flag(DEGRADED, "Host memory low: %d MB available" % avail)
+
+    return status, problems
+
+
+def build_host_state(metrics, thresholds, host_name, timestamp):
+    status, problems = evaluate_host(metrics, thresholds)
     state = dict(metrics)
     state["status"] = status
     state["problems"] = problems

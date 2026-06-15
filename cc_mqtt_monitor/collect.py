@@ -13,6 +13,8 @@ import json
 import shutil
 import time
 
+from .solar import solar_elevation_deg
+
 # ---------------------------------------------------------------------------
 # Process detection (via /proc; no external pgrep dependency)
 # ---------------------------------------------------------------------------
@@ -123,6 +125,49 @@ def collect_capture(station, now=None):
     if fits:
         newest = max(_safe_mtime(f) for f in fits)
         result["newest_fits_age_s"] = round(now - newest, 1)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Frame images (daytime / continuous output, written to FramesFiles)
+# ---------------------------------------------------------------------------
+
+
+def collect_frames(station, now=None):
+    """Freshness of saved frame images.
+
+    Layout: FramesFiles/YYYY/YYYYMMDD-jjj/YYYYMMDD-jjj_HH/<id>_<time>_<ms>_<d|n>.ext
+    We walk the newest year -> date -> hour dir (cheap, no full recursion) and
+    read the newest image. The trailing _d / _n encodes the camera mode RMS
+    believed it was in when the frame was written.
+    """
+    now = now or time.time()
+    result = {"newest_frame_age_s": None, "frame_mode": None}
+    if not station.save_frames:
+        return result
+
+    hour_dir = station.frames_path
+    for _ in range(3):  # year -> date -> hour
+        nxt = _latest_subdir(hour_dir)
+        if not nxt:
+            return result
+        hour_dir = nxt
+
+    images = [
+        os.path.join(hour_dir, name)
+        for name in os.listdir(hour_dir)
+        if name.lower().endswith((".jpg", ".png"))
+    ]
+    if not images:
+        return result
+
+    newest = max(images, key=_safe_mtime)
+    result["newest_frame_age_s"] = round(now - _safe_mtime(newest), 1)
+    base = os.path.splitext(os.path.basename(newest))[0]
+    if base.endswith("_d"):
+        result["frame_mode"] = "day"
+    elif base.endswith("_n"):
+        result["frame_mode"] = "night"
     return result
 
 
@@ -336,15 +381,33 @@ def collect_disk(station):
         return {"disk_free_gb": None, "disk_total_gb": None}
 
 
-def collect_station(station, max_log_lines, now=None):
+def collect_mode(station, night_horizon_deg, now=None):
+    """Capture-mode context: what output should be expected right now."""
+    now = now or time.time()
+    result = {
+        "continuous_capture": station.continuous_capture,
+        "save_frames": station.save_frames,
+        "solar_elevation_deg": None,
+        "is_night": None,
+    }
+    if station.has_location:
+        elev = solar_elevation_deg(station.latitude, station.longitude, now)
+        result["solar_elevation_deg"] = round(elev, 2)
+        result["is_night"] = elev < night_horizon_deg
+    return result
+
+
+def collect_station(station, max_log_lines, night_horizon_deg, now=None):
     """Run every collector and merge into one flat metrics dict."""
     now = now or time.time()
     metrics = {"station_id": station.station_id}
     metrics.update(collect_process(station))
     metrics.update(collect_capture(station, now))
+    metrics.update(collect_frames(station, now))
     metrics.update(collect_detection(station, now))
     metrics.update(collect_logs(station, max_log_lines))
     metrics.update(collect_summary(station))
     metrics.update(collect_upload(station, now))
     metrics.update(collect_disk(station))
+    metrics.update(collect_mode(station, night_horizon_deg, now))
     return metrics

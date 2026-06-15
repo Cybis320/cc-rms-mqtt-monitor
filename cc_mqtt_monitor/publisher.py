@@ -55,6 +55,9 @@ class Publisher:
     def _state_topic(self, station_id):
         return "%s/%s/health" % (self.config.topic_prefix, station_id)
 
+    def _host_state_topic(self):
+        return "%s/%s/health" % (self.config.topic_prefix, self.config.host_name)
+
     def _send_discovery(self, station_id):
         if not self.config.ha_discovery_enabled:
             return
@@ -69,11 +72,34 @@ class Publisher:
             self.client.publish(topic, json.dumps(payload), qos=1, retain=True)
         self._discovery_sent.add(station_id)
 
+    def _send_host_discovery(self):
+        if not self.config.ha_discovery_enabled:
+            return
+        if "__host__" in self._discovery_sent:
+            return
+        for topic, payload in hadiscovery.host_discovery_messages(
+            self.config.host_name,
+            self._host_state_topic(),
+            self.host_status_topic,
+            self.config.ha_discovery_prefix,
+        ):
+            self.client.publish(topic, json.dumps(payload), qos=1, retain=True)
+        self._discovery_sent.add("__host__")
+
     def publish_state(self, state):
         station_id = state["station_id"]
         self._send_discovery(station_id)
         self.client.publish(
             self._state_topic(station_id),
+            json.dumps(state, default=str),
+            qos=1,
+            retain=True,
+        )
+
+    def publish_host_state(self, state):
+        self._send_host_discovery()
+        self.client.publish(
+            self._host_state_topic(),
             json.dumps(state, default=str),
             qos=1,
             retain=True,

@@ -16,6 +16,10 @@ _ENTITIES = [
      {"device_class": "running"}),
     ("sensor", "newest_fits_age_s", "Newest FITS age",
      {"unit_of_measurement": "s", "icon": "mdi:timer-outline"}),
+    ("sensor", "newest_frame_age_s", "Newest frame age",
+     {"unit_of_measurement": "s", "icon": "mdi:image-outline"}),
+    ("sensor", "solar_elevation_deg", "Sun elevation",
+     {"unit_of_measurement": "°", "icon": "mdi:weather-sunny"}),
     ("sensor", "fits_count", "FITS in session", {"icon": "mdi:image-multiple"}),
     ("sensor", "fatal_error_count", "Fatal log errors",
      {"icon": "mdi:alert-circle"}),
@@ -28,6 +32,22 @@ _ENTITIES = [
      {"icon": "mdi:filmstrip-off"}),
     ("sensor", "total_rss_mb", "Process memory",
      {"unit_of_measurement": "MB", "icon": "mdi:memory"}),
+    ("sensor", "problems", "Problems", {"icon": "mdi:format-list-bulleted"}),
+]
+
+
+# Host-wide (OS) entities, published as a separate HA device.
+_HOST_ENTITIES = [
+    ("sensor", "status", "Status", {"icon": "mdi:server"}),
+    ("sensor", "mem_available_mb", "Memory available",
+     {"unit_of_measurement": "MB", "icon": "mdi:memory"}),
+    ("sensor", "swap_free_mb", "Swap free",
+     {"unit_of_measurement": "MB", "icon": "mdi:harddisk"}),
+    ("sensor", "oom_kill_count", "OOM kills (recent)",
+     {"icon": "mdi:skull"}),
+    ("sensor", "last_oom_victim", "Last OOM victim", {"icon": "mdi:skull-outline"}),
+    ("sensor", "uptime_s", "Uptime",
+     {"unit_of_measurement": "s", "icon": "mdi:timer-sand"}),
     ("sensor", "problems", "Problems", {"icon": "mdi:format-list-bulleted"}),
 ]
 
@@ -52,6 +72,33 @@ def discovery_messages(station_id, state_topic, availability_topic, ha_prefix):
     for component, key, name, options in _ENTITIES:
         unique_id = "rms_%s_%s" % (station_id, key)
         config_topic = "%s/%s/%s/%s/config" % (ha_prefix, component, station_id, key)
+        payload = {
+            "name": name,
+            "unique_id": unique_id,
+            "object_id": unique_id,
+            "state_topic": state_topic,
+            "value_template": _value_template(component, key),
+            "availability_topic": availability_topic,
+            "payload_available": "online",
+            "payload_not_available": "offline",
+            "device": device,
+        }
+        payload.update(options)
+        yield config_topic, payload
+
+
+def host_discovery_messages(host_name, state_topic, availability_topic, ha_prefix):
+    """Yield (config_topic, payload_dict) for the host-wide OS entities."""
+    node = "rmshost_%s" % host_name
+    device = {
+        "identifiers": [node],
+        "name": "RMS host %s" % host_name,
+        "model": "RMS capture host",
+        "manufacturer": "CroatianMeteorNetwork",
+    }
+    for component, key, name, options in _HOST_ENTITIES:
+        unique_id = "%s_%s" % (node, key)
+        config_topic = "%s/%s/%s/%s/config" % (ha_prefix, component, node, key)
         payload = {
             "name": name,
             "unique_id": unique_id,

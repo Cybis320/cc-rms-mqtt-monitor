@@ -35,7 +35,12 @@ thresholds:
   fits_fresh_error_s: 120
   capture_active_window_s: 3600
   detection_grace_s: 1800
+  frame_fresh_warn_s: 90       # daytime/continuous frame-image freshness
+  frame_fresh_error_s: 300
+  night_horizon_deg: -5.26     # sun below this => expect FF (night) output
   disk_free_warn_gb: 20
   disk_free_error_gb: 5
   upload_queue_warn: 50
   clock_error_warn_ms: 100
+  mem_available_warn_mb: 800   # host RAM headroom (OOM early warning)
+  mem_available_error_mb: 300

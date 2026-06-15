@@ -37,8 +37,15 @@ class Thresholds:
     # active capture session before we warn / error (seconds).
     fits_fresh_warn_s: int = 30
     fits_fresh_error_s: int = 120
-    # Consider a capture session "active" if its directory was touched within
-    # this window. Used to avoid false alarms during idle daytime hours.
+    # Frame-image freshness (continuous/daytime output). Frames save every
+    # frame_save_aligned_interval (~5 s by default), so these are generous.
+    frame_fresh_warn_s: int = 90
+    frame_fresh_error_s: int = 300
+    # Sun elevation below which night output (FF compression) is expected.
+    # Matches the RMS capture horizon (-5:26).
+    night_horizon_deg: float = -5.26
+    # Fallback only (no station lat/lon): treat a capture session as "active"
+    # if its directory was touched within this window, to avoid daytime alarms.
     capture_active_window_s: int = 3600
     # Grace period after a capture dir appears before missing detection output
     # (FTPdetectinfo / CALSTARS) is treated as a stalled-pipeline problem.
@@ -47,6 +54,9 @@ class Thresholds:
     disk_free_error_gb: float = 5.0
     upload_queue_warn: int = 50
     clock_error_warn_ms: float = 100.0
+    # Host memory headroom (MB) before warning / erroring.
+    mem_available_warn_mb: int = 800
+    mem_available_error_mb: int = 300
 
 
 @dataclass
