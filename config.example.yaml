@@ -1,0 +1,41 @@
+# CC RMS MQTT monitor configuration.
+# Every value shown is the default; delete anything you do not need to change.
+# Copy to config.yaml and pass with: cc-rms-monitor --config config.yaml
+
+broker:
+  host: mqtt.contrailcast.com
+  port: 1883
+  username: null          # broker is open today; fill in to lock it down later
+  password: null
+  tls: false              # set true (and port 8883) when TLS is enabled
+  keepalive: 60
+  client_id_prefix: cc-rms-monitor
+
+# How stations are discovered:
+#   multicam  -> one station per <stations_dir>/*/.config
+#   single-cam-> falls back to <rms_dir>/.config when stations_dir is empty
+stations_dir: ~/source/Stations
+rms_dir: ~/source/RMS
+
+# Topic layout:
+#   <topic_prefix>/<host>/status      retained online/offline (Last Will)
+#   <topic_prefix>/<station>/health   retained JSON state blob
+topic_prefix: contrailcast/rms
+
+# Home Assistant MQTT Discovery (auto-creates entities). Harmless if unused.
+ha_discovery_enabled: true
+ha_discovery_prefix: homeassistant
+
+interval_seconds: 60
+log_tail_lines: 4000
+host_name: null           # defaults to the system hostname
+
+thresholds:
+  fits_fresh_warn_s: 30
+  fits_fresh_error_s: 120
+  capture_active_window_s: 3600
+  detection_grace_s: 1800
+  disk_free_warn_gb: 20
+  disk_free_error_gb: 5
+  upload_queue_warn: 50
+  clock_error_warn_ms: 100

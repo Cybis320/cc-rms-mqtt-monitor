@@ -1,0 +1,16 @@
+[Unit]
+Description=CC RMS MQTT health monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust User and paths to match the install. Uses the RMS virtualenv so paho
+# and pyyaml are available without a separate environment.
+User=ops
+ExecStart=/home/ops/vRMS/bin/python -m cc_mqtt_monitor --config /home/ops/source/CC_Utils/MQTT_monitor/config.yaml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
