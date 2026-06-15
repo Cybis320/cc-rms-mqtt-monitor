@@ -81,9 +81,10 @@ class Config:
     # everything (state, host status/LWT, and HA discovery) must live under it.
     topic_prefix: str = "stations"
 
-    # Home Assistant MQTT Discovery. Must stay inside the allowed namespace, so
-    # point HA's MQTT integration discovery prefix at this same value.
-    ha_discovery_enabled: bool = True
+    # Home Assistant MQTT Discovery. Off by default (the contrailcast network
+    # uses ntfy + Telegram for alerting, not HA). Enable + point HA's MQTT
+    # integration discovery prefix at this value if you do use Home Assistant.
+    ha_discovery_enabled: bool = False
     ha_discovery_prefix: str = "stations/homeassistant"
 
     interval_seconds: int = 60

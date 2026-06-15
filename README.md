@@ -63,9 +63,11 @@ stations/homeassistant/<component>/<id>/<key>/config   retained HA discovery
 > **Broker namespace:** the contrailcast broker is an open, unauthenticated,
 > plaintext broker whose ACL only permits the `stations/#` topic tree. Every
 > topic — including the host status/Last-Will and the HA discovery configs —
-> therefore lives under `stations/`. For Home Assistant, set the MQTT
-> integration's discovery prefix to `stations/homeassistant` so it picks these
-> up. Set `ha_discovery_enabled: false` to skip publishing discovery configs.
+> therefore lives under `stations/`. Alerting is handled by a broker-side
+> consumer of the `stations/<id>/health` topics (ntfy + Telegram). Home
+> Assistant discovery is **off by default**; enable `ha_discovery_enabled: true`
+> (and point HA's MQTT discovery prefix at `stations/homeassistant`) only if you
+> use Home Assistant.
 
 The host status topic is the MQTT **Last Will** target, so a crashed agent or
 offline host is detected without polling, and HA entities flip to "unavailable".
