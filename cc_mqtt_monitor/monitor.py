@@ -32,11 +32,12 @@ def _station_group(station, config):
     return config.group or station.camera_group_name
 
 
-def gather(config):
-    """Discover stations and build a state dict for each (no MQTT involved)."""
+def gather(config, maint=None):
+    """Discover stations and build a state dict for each (no MQTT involved).
+    `maint` is the (bool, reason) maintenance tuple; computed if not passed."""
     stations = discover_stations(config.stations_dir, config.rms_dir)
     disabled = set(config.disabled_checks or [])
-    maint, maint_reason = maintenance.detect(config)
+    maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     now = time.time()
     states = []
     for station in stations:
@@ -51,7 +52,7 @@ def gather(config):
     return states
 
 
-def gather_host(config):
+def gather_host(config, maint=None):
     """Build the host-wide (OS) state dict."""
     stations = discover_stations(config.stations_dir, config.rms_dir)
     disabled = set(config.disabled_checks or [])
@@ -64,7 +65,7 @@ def gather_host(config):
     state["groups"] = groups
     state["group_slugs"] = [_slug(g) for g in groups]
     state["station_ids"] = [s.station_id for s in stations]
-    maint, maint_reason = maintenance.detect(config)
+    maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     state["maintenance"] = maint
     state["maintenance_reason"] = maint_reason
     return state
@@ -98,13 +99,14 @@ def make_test_state(config):
 
 def run_once(config, publisher=None):
     """Collect host + every station once and (optionally) publish."""
-    host_state = gather_host(config)
+    maint = maintenance.detect(config)            # one scan per cycle, shared
+    host_state = gather_host(config, maint)
     log.info("host %s: %s %s", config.host_name, host_state["status"],
              ("- " + "; ".join(host_state["problems"])) if host_state["problems"] else "")
     if publisher:
         publisher.publish_host_state(host_state)
 
-    states = gather(config)
+    states = gather(config, maint)
     for state in states:
         log.info("%s: %s %s", state["station_id"], state["status"],
                  ("- " + "; ".join(state["problems"])) if state["problems"] else "")
@@ -146,9 +148,29 @@ def run_loop(config, publisher):
                 run_once(config, publisher)
             except Exception:  # never let one bad cycle kill the agent
                 log.exception("Error during monitor cycle")
-            elapsed = time.time() - start
-            time.sleep(max(1.0, config.interval_seconds - elapsed))
+            # Sleep until the next cycle, but wake early and re-publish if the
+            # maintenance state flips (e.g. GRMSUpdater just started) -- so the
+            # bridge learns it's an expected disruption before a fast reboot.
+            _sleep_until_next(config, start)
     except KeyboardInterrupt:
         log.info("Interrupted; shutting down")
     finally:
         publisher.disconnect()
+
+
+# How often, during the inter-cycle sleep, to re-check the maintenance state.
+_MAINT_POLL_S = 10
+
+
+def _sleep_until_next(config, cycle_start):
+    """Sleep up to interval_seconds; return early if maintenance state changes."""
+    baseline = maintenance.detect(config)[0]
+    deadline = cycle_start + config.interval_seconds
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        time.sleep(min(_MAINT_POLL_S, remaining))
+        if maintenance.detect(config)[0] != baseline:
+            log.info("Maintenance state changed; publishing immediately")
+            return
