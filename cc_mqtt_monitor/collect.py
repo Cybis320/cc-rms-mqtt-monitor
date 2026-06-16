@@ -381,18 +381,51 @@ def collect_disk(station):
         return {"disk_free_gb": None, "disk_total_gb": None}
 
 
+# RMS day/night switch horizons (degrees below the horizon), matched to RMS so
+# our expectation flips exactly when the camera does:
+#   continuous + switch_camera_modes -> CaptureModeSwitcher SWITCH_HORIZON (-9)
+#   otherwise                        -> CaptureDuration CAPTURE_HORIZON (-5:26)
+_SWITCH_HORIZON_CONTINUOUS = -9.0
+_SWITCH_HORIZON_STANDARD = -5.4
+# Hysteresis band (deg) around the switch where the camera is reconfiguring and
+# we expect nothing in particular -- so the switch-over never false-alarms.
+_TRANSITION_BUFFER_DEG = 3.0
+
+
+def _expected_output(station, elev):
+    """What disk output should currently be fresh, from the sun + capture mode.
+
+    Returns "ff" (night FF compression), "frames" (daytime continuous frame
+    images), "idle" (nothing expected), or "transition" (mid-switch, no alarm).
+    Independent of whether frames are actually being written.
+    """
+    cont = station.continuous_capture
+    switch = station.switch_camera_modes
+    if cont and not switch:
+        return "ff"  # one fixed (night) mode, compressing FF 24/7
+
+    horizon = _SWITCH_HORIZON_CONTINUOUS if (cont and switch) else _SWITCH_HORIZON_STANDARD
+    if elev < horizon - _TRANSITION_BUFFER_DEG:
+        return "ff"  # night
+    if elev > horizon + _TRANSITION_BUFFER_DEG:
+        # day: continuous keeps saving frames; standard capture is idle
+        return "frames" if (cont and station.save_frames) else "idle"
+    return "transition"
+
+
 def collect_mode(station, now=None):
-    """Capture-mode context. solar_elevation_deg is informational only (the
-    health check observes actual output rather than predicting day/night)."""
+    """Capture-mode context: sun elevation and what output to expect now."""
     now = now or time.time()
     result = {
         "continuous_capture": station.continuous_capture,
         "save_frames": station.save_frames,
         "solar_elevation_deg": None,
+        "expected_output": None,
     }
     if station.has_location:
-        result["solar_elevation_deg"] = round(
-            solar_elevation_deg(station.latitude, station.longitude, now), 2)
+        elev = solar_elevation_deg(station.latitude, station.longitude, now)
+        result["solar_elevation_deg"] = round(elev, 2)
+        result["expected_output"] = _expected_output(station, elev)
     return result
 
 
