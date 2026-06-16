@@ -381,23 +381,22 @@ def collect_disk(station):
         return {"disk_free_gb": None, "disk_total_gb": None}
 
 
-def collect_mode(station, night_horizon_deg, now=None):
-    """Capture-mode context: what output should be expected right now."""
+def collect_mode(station, now=None):
+    """Capture-mode context. solar_elevation_deg is informational only (the
+    health check observes actual output rather than predicting day/night)."""
     now = now or time.time()
     result = {
         "continuous_capture": station.continuous_capture,
         "save_frames": station.save_frames,
         "solar_elevation_deg": None,
-        "is_night": None,
     }
     if station.has_location:
-        elev = solar_elevation_deg(station.latitude, station.longitude, now)
-        result["solar_elevation_deg"] = round(elev, 2)
-        result["is_night"] = elev < night_horizon_deg
+        result["solar_elevation_deg"] = round(
+            solar_elevation_deg(station.latitude, station.longitude, now), 2)
     return result
 
 
-def collect_station(station, max_log_lines, night_horizon_deg, now=None):
+def collect_station(station, max_log_lines, now=None):
     """Run every collector and merge into one flat metrics dict."""
     now = now or time.time()
     metrics = {"station_id": station.station_id}
@@ -409,5 +408,5 @@ def collect_station(station, max_log_lines, night_horizon_deg, now=None):
     metrics.update(collect_summary(station))
     metrics.update(collect_upload(station, now))
     metrics.update(collect_disk(station))
-    metrics.update(collect_mode(station, night_horizon_deg, now))
+    metrics.update(collect_mode(station, now))
     return metrics

@@ -39,13 +39,10 @@ host_name: null           # defaults to the system hostname
 group: null
 
 thresholds:
-  fits_fresh_warn_s: 30
-  fits_fresh_error_s: 120
+  output_fresh_error_s: 300    # error if no output (FF at night / frames by day)
+                               # for this long; generous to ride mode switches
   capture_active_window_s: 3600
   detection_grace_s: 1800
-  frame_fresh_warn_s: 90       # daytime/continuous frame-image freshness
-  frame_fresh_error_s: 300
-  night_horizon_deg: -5.26     # sun below this => expect FF (night) output
   disk_free_warn_gb: 20
   disk_free_error_gb: 5
   upload_queue_warn: 50

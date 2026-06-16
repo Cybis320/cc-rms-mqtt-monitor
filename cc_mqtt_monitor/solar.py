@@ -52,8 +52,3 @@ def solar_elevation_deg(latitude, longitude, epoch=None):
     cos_zenith = max(-1.0, min(1.0, cos_zenith))
     zenith = math.acos(cos_zenith)
     return 90.0 - math.degrees(zenith)
-
-
-def is_night(latitude, longitude, horizon_deg=-5.26, epoch=None):
-    """True if the sun is below horizon_deg (RMS capture horizon default)."""
-    return solar_elevation_deg(latitude, longitude, epoch) < horizon_deg

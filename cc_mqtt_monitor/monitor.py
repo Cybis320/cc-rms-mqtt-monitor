@@ -27,9 +27,7 @@ def gather(config):
     now = time.time()
     states = []
     for station in stations:
-        metrics = collect_station(
-            station, config.log_tail_lines,
-            config.thresholds.night_horizon_deg, now)
+        metrics = collect_station(station, config.log_tail_lines, now)
         state = build_state(metrics, config.thresholds, config.host_name, _iso(now))
         state["group"] = _station_group(station, config)
         states.append(state)

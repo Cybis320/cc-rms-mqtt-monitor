@@ -37,19 +37,14 @@ class BrokerConfig:
 
 @dataclass
 class Thresholds:
-    # Capture freshness: how stale the newest FITS file may get during an
-    # active capture session before we warn / error (seconds).
-    fits_fresh_warn_s: int = 30
-    fits_fresh_error_s: int = 120
-    # Frame-image freshness (continuous/daytime output). Frames save every
-    # frame_save_aligned_interval (~5 s by default), so these are generous.
-    frame_fresh_warn_s: int = 90
-    frame_fresh_error_s: int = 300
-    # Sun elevation below which night output (FF compression) is expected.
-    # Matches the RMS capture horizon (-5:26).
-    night_horizon_deg: float = -5.26
-    # Fallback only (no station lat/lon): treat a capture session as "active"
-    # if its directory was touched within this window, to avoid daytime alarms.
+    # Capture liveness: error if a station that should be capturing produces no
+    # output of any kind (FF file or frame image) for this long. Generous on
+    # purpose so it rides through camera day/night mode switches, which pause
+    # output for a bit while the camera reconfigures.
+    output_fresh_error_s: int = 300
+    # A non-continuous station counts as "capturing" only while its latest
+    # captured directory was written within this window (tells a real stall
+    # from normal daytime idle, without predicting the sun).
     capture_active_window_s: int = 3600
     # Grace period after a capture dir appears before missing detection output
     # (FTPdetectinfo / CALSTARS) is treated as a stalled-pipeline problem.

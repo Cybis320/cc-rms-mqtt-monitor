@@ -38,58 +38,42 @@ def evaluate(metrics, thresholds):
         # If the process is down, downstream freshness checks are moot.
         return status, problems
 
-    # --- What output should we expect right now? -------------------------
-    # FF compression runs at night (both modes). Frame images are saved during
-    # the day only in continuous mode, and at night whenever save_frames is on.
-    is_night = metrics.get("is_night")          # True/False, or None if unknown
-    continuous = metrics.get("continuous_capture")
-    save_frames = metrics.get("save_frames")
-    daynight_known = is_night is not None
-
-    expect_ff = is_night is True
-    expect_frames = bool(save_frames) and (continuous or is_night is True)
-
+    # --- Capture liveness (expect the right output for the camera's mode) --
+    # RMS tags each saved frame _d (day) / _n (night), so frame_mode is the
+    # camera's OWN current mode -- no need to predict day/night from the sun
+    # (and so no false alarm at the boundary). At night the FF files are the
+    # product and must stay fresh; by day only frame images are produced. The
+    # generous threshold rides through the mode switch, which pauses output
+    # briefly while the camera reconfigures.
+    fits_age = metrics.get("newest_fits_age_s")
+    frame_age = metrics.get("newest_frame_age_s")
+    frame_mode = metrics.get("frame_mode")          # "day" / "night" / None
     session_age = metrics.get("capture_session_age_s")
 
-    # --- FF (night) capture freshness ------------------------------------
-    fits_age = metrics.get("newest_fits_age_s")
-    if not daynight_known:
-        # No location: fall back to the activity-window heuristic.
-        session_active = (
-            session_age is not None
-            and session_age <= thresholds.capture_active_window_s
-        )
-        if session_active and fits_age is not None:
-            if fits_age >= thresholds.fits_fresh_error_s:
-                flag(ERROR, "Capture stalled: newest FITS is %.0fs old" % fits_age)
-            elif fits_age >= thresholds.fits_fresh_warn_s:
-                flag(DEGRADED, "Capture lagging: newest FITS is %.0fs old" % fits_age)
-    elif expect_ff and fits_age is not None:
-        if fits_age >= thresholds.fits_fresh_error_s:
-            flag(ERROR, "Night capture stalled: newest FITS is %.0fs old" % fits_age)
-        elif fits_age >= thresholds.fits_fresh_warn_s:
-            flag(DEGRADED, "Night capture lagging: newest FITS is %.0fs old" % fits_age)
+    if frame_mode == "night":
+        stalled_age, what = fits_age, "Night capture stalled: no FF for %.0fs"
+    elif frame_mode == "day":
+        stalled_age, what = frame_age, "Daytime capture stalled: no frames for %.0fs"
+    else:
+        # No frame tag (save_frames off, or none yet): check FF, but only while
+        # a capture session is actually in progress (its captured dir is recent),
+        # so a legitimately idle daytime station never alarms.
+        active = (session_age is not None
+                  and session_age <= thresholds.capture_active_window_s)
+        stalled_age = fits_age if active else None
+        what = "Capture stalled: no FF for %.0fs"
 
-    # --- Frame-image (daytime / continuous) freshness --------------------
-    frame_age = metrics.get("newest_frame_age_s")
-    if expect_frames:
-        when = "day" if is_night is False else "night"
-        if frame_age is None:
-            flag(ERROR, "No frame images found but frame saving is expected (%s)" % when)
-        elif frame_age >= thresholds.frame_fresh_error_s:
-            flag(ERROR, "Frame saving stalled (%s): newest frame is %.0fs old"
-                 % (when, frame_age))
-        elif frame_age >= thresholds.frame_fresh_warn_s:
-            flag(DEGRADED, "Frame saving lagging (%s): newest frame is %.0fs old"
-                 % (when, frame_age))
+    if stalled_age is not None and stalled_age >= thresholds.output_fresh_error_s:
+        flag(ERROR, what % stalled_age)
 
     # --- Silent pipeline failure (the ".so missing" class) ---------------
-    # At night, frames are being captured but no detection output appears after
-    # the grace period -> a stage (detection/calibration) is broken even though
-    # capture looks healthy. Gated to night, when detection is expected to run.
-    night_for_detection = is_night is True or not daynight_known
+    # FF files are being produced (so detection should be running) but no
+    # detection output has appeared after the grace period -> a stage is broken
+    # even though capture looks healthy. "FF recently produced" stands in for
+    # "this is a detection-eligible session" without predicting the sun.
+    ff_active = fits_age is not None and fits_age <= thresholds.output_fresh_error_s
     if (
-        night_for_detection
+        ff_active
         and metrics.get("fits_count", 0) > 0
         and session_age is not None
         and session_age > thresholds.detection_grace_s
