@@ -65,12 +65,32 @@ For **each host alert** (and the offline Last-Will), fan out to:
 Station IDs are alphanumeric and `group_slug` is pre-slugified, so every `cc-<…>`
 is a valid ntfy topic / Telegram tag (no spaces).
 
-## 4. Notify on change, not every cycle
+## 4. Notify on change, debounced (don't alert on transients)
 
-The monitor re-publishes retained state **every 60 s**. Keep the last seen
-`status` (and `problems`) per `station_id`/host and only notify when it
-**changes** — entering `degraded`/`error`, gaining new `problems`, or recovering
-to `ok`. Otherwise you'll send a notification every minute.
+The monitor re-publishes retained state **every 60 s** and reports the true
+*current* state — including brief, expected blips. Keep last-seen `status`/
+`problems` per `station_id`/host, and:
+
+1. **Only notify on change** — entering `degraded`/`error`, gaining new
+   `problems`, or recovering to `ok`. Never notify every cycle.
+2. **Debounce: require the condition to PERSIST before alerting** — a
+   "for N minutes" rule (suggest **5–10 min**, configurable). Only fire a
+   problem notification once a station/host has stayed non-`ok` (or `offline`)
+   continuously for N minutes; if it recovers within N minutes, **send nothing**.
+3. **Recovery only if you alerted** — send a recovery (`→ ok` / back `online`)
+   only when a problem notification was actually sent for that episode.
+
+This debounce is essential: the nightly `GRMSUpdater` cron (~19:00) restarts the
+RMS capture processes (brief `capture_down` on every station) and, on kernel
+updates, reboots the host (monitor down → Last-Will `offline` → `online`). Those
+resolve within a couple of minutes, so a 5–10 min persist window suppresses the
+whole burst while still catching real outages. The same rule absorbs RMS's own
+watchdog restarts and momentary log/detection blips.
+
+(Optional, additive: honor a maintenance flag — e.g. if `GRMSUpdater` touches a
+sentinel topic/file at start/end of an update — to mute a host entirely during
+planned maintenance. The persist-window debounce already handles the common
+case without it.)
 
 ## 5. Notification mapping
 
