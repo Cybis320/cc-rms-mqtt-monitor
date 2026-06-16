@@ -44,6 +44,9 @@ class Station:
     save_frames: bool = True
     latitude: float = 0.0
     longitude: float = 0.0
+    elevation: float = 0.0
+    # Multi-camera switch stagger (one of RMS's programmed switch delays).
+    capture_wait_seconds: float = 0.0
 
     @property
     def captured_path(self):
@@ -107,6 +110,8 @@ def _station_from_config(config_path):
     # RMS accepts latitude/longitude or the short lat/lon keys.
     latitude = _as_float(cfg.get("latitude", cfg.get("lat")))
     longitude = _as_float(cfg.get("longitude", cfg.get("lon")))
+    elevation = _as_float(cfg.get("elevation", cfg.get("elev")))
+    capture_wait_seconds = _as_float(cfg.get("capture_wait_seconds"))
 
     # camera_group_name: treat "none"/blank as unset.
     group = (cfg.get("camera_group_name") or "").strip()
@@ -127,6 +132,8 @@ def _station_from_config(config_path):
         save_frames=_as_bool(cfg.get("save_frames"), default=True),
         latitude=latitude,
         longitude=longitude,
+        elevation=elevation,
+        capture_wait_seconds=capture_wait_seconds,
     )
 
 

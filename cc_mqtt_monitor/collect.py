@@ -14,6 +14,7 @@ import shutil
 import time
 
 from .solar import solar_elevation_deg
+from . import rmsmode
 
 # ---------------------------------------------------------------------------
 # Process detection (via /proc; no external pgrep dependency)
@@ -414,18 +415,30 @@ def _expected_output(station, elev):
 
 
 def collect_mode(station, now=None):
-    """Capture-mode context: sun elevation and what output to expect now."""
+    """Capture-mode context: sun elevation and what output to expect now.
+
+    Prefer RMS's own switch logic (ephem + RMS horizons + programmed delays);
+    fall back to the self-contained NOAA approximation if ephem isn't available
+    or the computation can't be done (e.g. polar day/night)."""
     now = now or time.time()
     result = {
         "continuous_capture": station.continuous_capture,
         "save_frames": station.save_frames,
         "solar_elevation_deg": None,
         "expected_output": None,
+        "mode_source": None,
     }
     if station.has_location:
-        elev = solar_elevation_deg(station.latitude, station.longitude, now)
-        result["solar_elevation_deg"] = round(elev, 2)
-        result["expected_output"] = _expected_output(station, elev)
+        result["solar_elevation_deg"] = round(
+            solar_elevation_deg(station.latitude, station.longitude, now), 2)
+        rms_expected = rmsmode.expected_output(station, now)
+        if rms_expected is not None:
+            result["expected_output"] = rms_expected
+            result["mode_source"] = "rms-ephem"
+        else:
+            elev = solar_elevation_deg(station.latitude, station.longitude, now)
+            result["expected_output"] = _expected_output(station, elev)
+            result["mode_source"] = "approx"
     return result
 
 

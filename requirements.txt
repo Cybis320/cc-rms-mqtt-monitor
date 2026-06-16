@@ -1,2 +1,6 @@
 paho-mqtt>=1.6
 pyyaml>=5.1
+# Optional: if present (it's an RMS dependency, so it is in the RMS venv), day/
+# night is computed with RMS's own ephem-based logic; otherwise the monitor
+# falls back to a self-contained solar approximation.
+# ephem
