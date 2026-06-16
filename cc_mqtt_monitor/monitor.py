@@ -26,9 +26,9 @@ def _slug(name):
 
 
 def _station_group(station, config):
-    """Subscription group: the station's RMS camera_group_name, or the monitor
-    config's `group` as a fallback when the RMS field is unset."""
-    return station.camera_group_name or config.group
+    """Subscription group: the explicit config `group` override if set (the
+    operator's install-time choice), else the station's RMS camera_group_name."""
+    return config.group or station.camera_group_name
 
 
 def gather(config):

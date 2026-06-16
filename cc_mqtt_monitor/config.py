@@ -91,9 +91,9 @@ class Config:
     # Identifier for this host (defaults to the system hostname).
     host_name: str = None
 
-    # Fallback subscription group for the alert bridge. The primary source is
-    # each station's `camera_group_name` in its RMS .config; this is only used
-    # for stations whose camera_group_name is unset ("none").
+    # Explicit subscription-group override (the installer's choice). When set, it
+    # applies to every station on this host; when null, each station uses its own
+    # RMS `camera_group_name`. Published as `group` (+ a slugified `group_slug`).
     group: str = None
 
     # Health checks to silence, by key (see health.CHECK_KEYS). Empty = all on.

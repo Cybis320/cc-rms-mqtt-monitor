@@ -126,10 +126,28 @@ Example `health` payload:
 }
 ```
 
-`group` is the human-readable label (RMS `camera_group_name`); **`group_slug`**
-is the canonical subscription handle — spaces/punctuation collapsed to `-` so it
-is valid as an ntfy topic / Telegram tag. The bridge fans alerts to `cc-<group_slug>`
-(the host record carries `groups` + `group_slugs` lists for its stations).
+`group` is the human-readable label (RMS `camera_group_name`, or the installer's
+override); **`group_slug`** is the canonical subscription handle — spaces/
+punctuation collapsed to `-` so it is valid as an ntfy topic / Telegram tag.
+
+### Ways to subscribe (ntfy / Telegram)
+
+The bridge fans each alert out to several topics, so you pick the granularity:
+
+| Subscribe to | Covers |
+|---|---|
+| `cc-<group_slug>` | your whole group (e.g. `cc-Phoenix-1`) |
+| `cc-<stationID>` | one camera (e.g. `cc-US005A`) |
+| `cc-<prefix>` | **a whole network** — *any leading prefix of a station ID* (`cc-USC`, `cc-CAC`, `cc-UV`, `cc-USL`, …) |
+
+The prefix axis is the important one for network coordinators: subscribe to
+`cc-USC` (or `cc-CAC`, …) **once**, and every current *and future* station whose
+ID starts with that prefix is covered automatically — no ntfy change is needed
+when a new station is deployed, because the bridge publishes each station's
+alerts to all prefixes of its ID as soon as its monitor comes online.
+
+The host record carries `groups` + `group_slugs` + `station_ids`, so host-level
+(OOM/memory) alerts fan out to the same group and prefix topics.
 
 ## Install
 

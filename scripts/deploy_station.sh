@@ -54,34 +54,53 @@ info "Installing package + dependencies"
 "$PY" -m pip install --quiet --upgrade pip
 "$PY" -m pip install --quiet -e "$DEST"
 
-# --- 3. Config --------------------------------------------------------------
-sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9_.-'; }
+# --- 3. Config + subscription group -----------------------------------------
+# Keep the label human-readable (allow spaces); the slug for topics strips them.
+sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9 _.-' | sed -E 's/^ +//; s/ +$//'; }
+slugify()  { printf '%s' "$1" | sed -E 's/[^A-Za-z0-9]+/-/g; s/^-+//; s/-+$//'; }
 
 if [ ! -f "$DEST/config.yaml" ]; then
     cp "$DEST/config.example.yaml" "$DEST/config.yaml"
 
-    # Subscription group comes from each station's camera_group_name in its RMS
-    # .config — read automatically at runtime, nothing to enter. Detect it here
-    # just to confirm, and only offer a fallback if no station has one set.
     STATIONS_DIR="${CC_STATIONS_DIR:-$HOME/source/Stations}"
     RMS_DIR="${CC_RMS_DIR:-$HOME/source/RMS}"
     DETECTED="$(grep -hE '^[[:space:]]*camera_group_name:' \
                     "$STATIONS_DIR"/*/.config "$RMS_DIR/.config" 2>/dev/null \
                 | sed -E 's/^[[:space:]]*camera_group_name:[[:space:]]*//; s/[[:space:]]*$//' \
-                | grep -viE '^(none)?$' | sort -u | paste -sd ',' -)"
+                | grep -viE '^(none)?$' | sort -u | head -n1)"
+    HOST="$(hostname)"
 
-    if [ -n "$DETECTED" ]; then
-        info "Using camera_group_name from RMS config: ${DETECTED}"
-    else
-        # No camera_group_name set anywhere; offer a fallback group.
-        GROUP="$(sanitize "${CC_GROUP:-}")"
-        if [ -z "$GROUP" ] && [ -r /dev/tty ]; then
-            echo "No camera_group_name found in your RMS station configs."
-            read -rp "Fallback subscription group for this host (optional, blank to skip): " GROUP < /dev/tty || true
-            GROUP="$(sanitize "$GROUP")"
+    # Decide the subscription group. Blank GROUP -> leave config.group null so
+    # the monitor uses each station's live RMS camera_group_name.
+    GROUP=""
+    if [ -n "${CC_GROUP:-}" ]; then
+        GROUP="${CC_GROUP}"                                  # non-interactive override
+    elif [ -r /dev/tty ]; then
+        echo
+        echo "Subscription group for alerts (ntfy/Telegram):"
+        if [ -n "$DETECTED" ]; then
+            echo "  1) RMS camera_group_name:  ${DETECTED}   [default]"
+        else
+            echo "  1) (no camera_group_name set in RMS config)"
         fi
-        [ -n "$GROUP" ] && sed -i "s|^group:.*|group: $GROUP|" "$DEST/config.yaml"
-        info "Created config.yaml (fallback group='${GROUP:-none}')"
+        echo "  2) hostname:               ${HOST}"
+        echo "  3) something else (custom)"
+        read -rp "Selection [1]: " sel < /dev/tty || true
+        case "$sel" in
+            2) GROUP="$HOST" ;;
+            3) read -rp "Custom group name: " GROUP < /dev/tty || true ;;
+            *) [ -z "$DETECTED" ] && GROUP="$HOST" ;;         # default; hostname if no RMS group
+        esac
+    else
+        [ -z "$DETECTED" ] && GROUP="$HOST"                  # non-interactive, no RMS group
+    fi
+
+    GROUP="$(sanitize "$GROUP")"
+    if [ -n "$GROUP" ]; then
+        sed -i "s|^group:.*|group: \"$GROUP\"|" "$DEST/config.yaml"
+        info "Subscription group: $GROUP   (topic slug: $(slugify "$GROUP"))"
+    else
+        info "Subscription group: per-station RMS camera_group_name (e.g. ${DETECTED:-none})"
     fi
 else
     info "Keeping existing config.yaml"
@@ -173,5 +192,30 @@ if command -v systemctl >/dev/null 2>&1; then
 else
     warn "systemd not found; run manually:  $PY -m cc_mqtt_monitor --config $DEST/config.yaml"
 fi
+
+# --- 5. ntfy subscription help ---------------------------------------------
+# Print the exact topics to subscribe to, derived from this host's own data.
+# (Topics use the "cc-" prefix per the contrailcast ntfy/Telegram bridge.)
+echo
+info "Subscribe in the ntfy app (your ntfy server) to any of these topics:"
+"$PY" -m cc_mqtt_monitor --config "$DEST/config.yaml" --status 2>/dev/null | "$PY" -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+stations = d.get("stations", [])
+slugs = sorted({s.get("group_slug") for s in stations if s.get("group_slug")})
+sids = [s["station_id"] for s in stations]
+for sl in slugs:
+    print("    your group         ->  cc-%s" % sl)
+for sid in sids:
+    print("    one camera         ->  cc-%s" % sid)
+print("    a whole network    ->  cc-USC, cc-CAC, cc-UV, cc-USL, ...")
+print("                           ANY leading prefix of a station ID is a topic.")
+print("                           Subscribe to a network prefix ONCE and every current")
+print("                           AND future station with that prefix is covered")
+print("                           automatically -- no ntfy change when new stations deploy.")
+' || true
 
 info "Done."

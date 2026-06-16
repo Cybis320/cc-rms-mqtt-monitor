@@ -33,9 +33,9 @@ interval_seconds: 60
 log_tail_lines: 4000
 host_name: null           # defaults to the system hostname
 
-# Subscription group for the alert bridge. The PRIMARY source is each station's
-# `camera_group_name` in its RMS .config (read automatically). This value is only
-# a FALLBACK, applied to stations whose camera_group_name is unset ("none").
+# Subscription-group OVERRIDE (the installer asks and sets this). When set it
+# applies to every station on this host; when null, each station uses its own
+# RMS camera_group_name. Subscribers use cc-<slug-of-group>.
 group: null
 
 # Health checks to silence (by key), e.g. [dropped_frames, upload_backlog].
