@@ -7,8 +7,10 @@ Status levels (worst wins):
     error     -- capture down, pipeline stalled, fatal log errors, disk critical
 
 The ``problems`` list explains *why*, so a dashboard can show actionable text
-rather than just a colour. This is also where the silent-failure heuristics
-live: "alive and capturing but producing no detection output".
+rather than just a colour.
+
+Every check has a stable key (see CHECK_KEYS); a key listed in `disabled`
+(config `disabled_checks`) is silently skipped. All checks are on by default.
 """
 
 OK = "ok"
@@ -17,33 +19,54 @@ ERROR = "error"
 
 _RANK = {OK: 0, DEGRADED: 1, ERROR: 2}
 
+# Stable keys for every trigger, usable in config `disabled_checks`.
+CHECK_KEYS = (
+    "capture_down",       # capture process for the station not running
+    "capture_stalled",    # no FF (night) / no frames (day) within the threshold
+    "detection_stalled",  # capturing but no FTPdetectinfo/CALSTARS produced
+    "log_fatal",          # traceback / ImportError / .so / segfault in the log
+    "watchdog",           # RMS WATCHDOG died/stale/Restarting event
+    "disk_low",           # data partition low / critically low
+    "upload_backlog",     # upload queue length over threshold
+    "clock_unsynced",     # last summary reported clock not synchronized
+    "clock_uncertainty",  # last summary clock error over threshold
+    "dropped_frames",     # dropped frames in the last 10 min
+    "oom",                # host OOM-killer fired
+    "host_memory",        # host available memory low / critically low
+)
+
 
 def _worse(a, b):
     return a if _RANK[a] >= _RANK[b] else b
 
 
-def evaluate(metrics, thresholds):
-    """Return (status, problems) for a station's metrics dict."""
-    status = OK
-    problems = []
+def _flagger(disabled):
+    """Build a (flag, get_status, get_problems) trio sharing local state."""
+    state = {"status": OK, "problems": []}
 
-    def flag(level, message):
-        nonlocal status
-        status = _worse(status, level)
-        problems.append(message)
+    def flag(level, key, message):
+        if key in disabled:
+            return
+        state["status"] = _worse(state["status"], level)
+        state["problems"].append(message)
+
+    return flag, state
+
+
+def evaluate(metrics, thresholds, disabled=()):
+    """Return (status, problems) for a station's metrics dict."""
+    flag, state = _flagger(disabled)
 
     # --- Capture process -------------------------------------------------
     if not metrics.get("capture_alive"):
-        flag(ERROR, "Capture process not running")
-        # If the process is down, downstream freshness checks are moot.
-        return status, problems
+        flag(ERROR, "capture_down", "Capture process not running")
+        # Process down -> downstream freshness checks are moot.
+        return state["status"], state["problems"]
 
     # --- Capture liveness (expect the right output for day/night) --------
-    # expected_output comes from the sun + capture mode (see collect._expected_
-    # output), independent of whether frames are being written. At night FF
-    # files are the product and must stay fresh; in continuous daytime, frame
-    # images are. The "transition" band around the camera's switch angle expects
-    # nothing, so the switch-over never false-alarms.
+    # expected_output comes from the sun + capture mode (RMS-faithful), not from
+    # frame creation. Night -> FF must be fresh; continuous day -> frames must
+    # be. "transition"/"idle" expect nothing.
     fits_age = metrics.get("newest_fits_age_s")
     frame_age = metrics.get("newest_frame_age_s")
     session_age = metrics.get("capture_session_age_s")
@@ -64,71 +87,88 @@ def evaluate(metrics, thresholds):
             expected = "idle"
 
     if expected == "ff" and fits_age is not None and fits_age >= thresholds.output_fresh_error_s:
-        flag(ERROR, "Night capture stalled: no FF for %.0fs" % fits_age)
+        flag(ERROR, "capture_stalled", "Night capture stalled: no FF for %.0fs" % fits_age)
     elif expected == "frames" and frame_age is not None and frame_age >= thresholds.output_fresh_error_s:
-        flag(ERROR, "Daytime capture stalled: no frames for %.0fs" % frame_age)
-    # expected in ("idle", "transition"): nothing to flag.
+        flag(ERROR, "capture_stalled", "Daytime capture stalled: no frames for %.0fs" % frame_age)
 
     # --- Silent pipeline failure (the ".so missing" class) ---------------
-    # FF compression is expected (night) but no detection output has appeared
-    # after the grace period -> a stage is broken even though capture looks
-    # healthy.
-    ff_active = expected == "ff"
     if (
-        ff_active
+        expected == "ff"
         and metrics.get("fits_count", 0) > 0
         and session_age is not None
         and session_age > thresholds.detection_grace_s
         and not metrics.get("ftpdetect_present")
         and not metrics.get("calstars_present")
     ):
-        flag(ERROR, "Detection pipeline produced no output after %.0fs of capture"
-             % session_age)
+        flag(ERROR, "detection_stalled",
+             "Detection pipeline produced no output after %.0fs of capture" % session_age)
 
     # --- Fatal log errors / tracebacks -----------------------------------
     if metrics.get("fatal_error_count"):
         last = metrics.get("last_error") or "see log"
-        flag(ERROR, "Fatal error in log (%dx): %s"
+        flag(ERROR, "log_fatal", "Fatal error in log (%dx): %s"
              % (metrics["fatal_error_count"], last))
     if metrics.get("last_watchdog_event"):
-        flag(DEGRADED, "Watchdog intervention: %s" % metrics["last_watchdog_event"])
+        flag(DEGRADED, "watchdog", "Watchdog intervention: %s" % metrics["last_watchdog_event"])
 
     # --- Disk ------------------------------------------------------------
     disk_free = metrics.get("disk_free_gb")
     if disk_free is not None:
         if disk_free <= thresholds.disk_free_error_gb:
-            flag(ERROR, "Disk critically low: %.1f GB free" % disk_free)
+            flag(ERROR, "disk_low", "Disk critically low: %.1f GB free" % disk_free)
         elif disk_free <= thresholds.disk_free_warn_gb:
-            flag(DEGRADED, "Disk low: %.1f GB free" % disk_free)
+            flag(DEGRADED, "disk_low", "Disk low: %.1f GB free" % disk_free)
 
-    # --- Upload backlog --------------------------------------------------
+    # --- Upload backlog (only meaningful when uploads are queued) --------
     queue = metrics.get("upload_queue_len", 0)
     if queue >= thresholds.upload_queue_warn:
-        flag(DEGRADED, "Upload backlog: %d files queued" % queue)
+        flag(DEGRADED, "upload_backlog", "Upload backlog: %d files queued" % queue)
 
     # --- Time sync (from latest observation summary) ---------------------
     summary = metrics.get("summary") or {}
     if str(summary.get("clock_synchronized")).lower() == "false":
-        flag(DEGRADED, "Clock not synchronized at last summary")
+        flag(DEGRADED, "clock_unsynced", "Clock not synchronized at last summary")
     clock_err = summary.get("clock_error_uncertainty_ms")
     if clock_err is not None:
         try:
             if float(clock_err) > thresholds.clock_error_warn_ms:
-                flag(DEGRADED, "Clock uncertainty %.0f ms" % float(clock_err))
+                flag(DEGRADED, "clock_uncertainty", "Clock uncertainty %.0f ms" % float(clock_err))
         except (TypeError, ValueError):
             pass
 
     # --- Dropped frames --------------------------------------------------
     if metrics.get("dropped_frames_10min"):
-        flag(DEGRADED, "Dropped %d frames in last 10 min"
-             % metrics["dropped_frames_10min"])
+        flag(DEGRADED, "dropped_frames",
+             "Dropped %d frames in last 10 min" % metrics["dropped_frames_10min"])
 
-    return status, problems
+    return state["status"], state["problems"]
 
 
-def build_state(metrics, thresholds, host_name, timestamp):
+def evaluate_host(metrics, thresholds, disabled=()):
+    """Return (status, problems) for host-wide OS metrics (memory, OOM)."""
+    flag, state = _flagger(disabled)
+
+    # OOM-killer activity is always significant; killing a python (RMS) process
+    # is treated as an error, anything else as degraded.
+    if metrics.get("oom_kill_count"):
+        victim = metrics.get("last_oom_victim") or "?"
+        level = ERROR if "python" in str(victim).lower() else DEGRADED
+        flag(level, "oom", "OOM-killer fired %dx (last victim: %s)"
+             % (metrics["oom_kill_count"], victim))
+
+    avail = metrics.get("mem_available_mb")
+    if avail is not None:
+        if avail <= thresholds.mem_available_error_mb:
+            flag(ERROR, "host_memory", "Host memory critically low: %d MB available" % avail)
+        elif avail <= thresholds.mem_available_warn_mb:
+            flag(DEGRADED, "host_memory", "Host memory low: %d MB available" % avail)
+
+    return state["status"], state["problems"]
+
+
+def build_state(metrics, thresholds, host_name, timestamp, disabled=()):
     """Assemble the published JSON state for one station."""
-    status, problems = evaluate(metrics, thresholds)
+    status, problems = evaluate(metrics, thresholds, disabled)
     state = dict(metrics)
     state["status"] = status
     state["problems"] = problems
@@ -137,36 +177,8 @@ def build_state(metrics, thresholds, host_name, timestamp):
     return state
 
 
-def evaluate_host(metrics, thresholds):
-    """Return (status, problems) for host-wide OS metrics (memory, OOM)."""
-    status = OK
-    problems = []
-
-    def flag(level, message):
-        nonlocal status
-        status = _worse(status, level)
-        problems.append(message)
-
-    # OOM-killer activity is always significant; killing a python (RMS) process
-    # is treated as an error, anything else as degraded.
-    if metrics.get("oom_kill_count"):
-        victim = metrics.get("last_oom_victim") or "?"
-        level = ERROR if "python" in str(victim).lower() else DEGRADED
-        flag(level, "OOM-killer fired %dx (last victim: %s)"
-             % (metrics["oom_kill_count"], victim))
-
-    avail = metrics.get("mem_available_mb")
-    if avail is not None:
-        if avail <= thresholds.mem_available_error_mb:
-            flag(ERROR, "Host memory critically low: %d MB available" % avail)
-        elif avail <= thresholds.mem_available_warn_mb:
-            flag(DEGRADED, "Host memory low: %d MB available" % avail)
-
-    return status, problems
-
-
-def build_host_state(metrics, thresholds, host_name, timestamp):
-    status, problems = evaluate_host(metrics, thresholds)
+def build_host_state(metrics, thresholds, host_name, timestamp, disabled=()):
+    status, problems = evaluate_host(metrics, thresholds, disabled)
     state = dict(metrics)
     state["status"] = status
     state["problems"] = problems

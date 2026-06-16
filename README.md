@@ -49,6 +49,41 @@ event that kills an RMS process: the systemd unit sets `OOMScoreAdjust=-900`
 pyyaml) and the unit caps it at `MemoryMax=128M` so it can never itself add to
 host memory pressure.
 
+## Health checks (triggers)
+
+Every check has a stable key and is **on by default**. The verdict is the worst
+of all fired checks (`ok` < `degraded` < `error`); the `problems[]` list carries
+the human-readable text.
+
+| Key | Severity | Fires when | Threshold |
+|---|---|---|---|
+| `capture_down` | error | the station's `RMS.StartCapture` process isn't running | — |
+| `capture_stalled` | error | expected output is stale — no FF (night) or no frame (continuous day) | `output_fresh_error_s` (300s) |
+| `detection_stalled` | error | capturing FF but no `FTPdetectinfo`/`CALSTARS` produced | `detection_grace_s` (1800s) |
+| `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault in the log | — |
+| `watchdog` | degraded | RMS `WATCHDOG: died/stale/Restarting` event | — |
+| `disk_low` | degraded / error | data partition free space low / critical | `disk_free_warn_gb` (20) / `disk_free_error_gb` (5) |
+| `upload_backlog` | degraded | upload queue length over threshold | `upload_queue_warn` (50) |
+| `clock_unsynced` | degraded | last summary reported clock not synchronized | — |
+| `clock_uncertainty` | degraded | last summary clock error over threshold | `clock_error_warn_ms` (100) |
+| `dropped_frames` | degraded | dropped frames in the last 10 min | > 0 |
+| `oom` | error (python victim) / degraded | host OOM-killer fired (kernel log) | — |
+| `host_memory` | degraded / error | host available memory low / critical | `mem_available_warn_mb` (800) / `..._error_mb` (300) |
+
+Day/night for `capture_stalled` comes from the sun (matching RMS's own switch
+horizon + programmed delays), not from frame creation. Conditional checks stay
+quiet when not applicable (e.g. `upload_backlog` only when uploads are queued,
+the clock checks only when a summary exists).
+
+**Silencing a check:** add its key to `disabled_checks` in `config.yaml`
+(default empty = all on), e.g.:
+
+```yaml
+disabled_checks: [dropped_frames, upload_backlog]
+```
+
+Tune sensitivity instead with the `thresholds:` block (see `config.example.yaml`).
+
 ## Health topics
 
 ```

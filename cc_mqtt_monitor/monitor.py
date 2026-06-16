@@ -24,11 +24,12 @@ def _station_group(station, config):
 def gather(config):
     """Discover stations and build a state dict for each (no MQTT involved)."""
     stations = discover_stations(config.stations_dir, config.rms_dir)
+    disabled = set(config.disabled_checks or [])
     now = time.time()
     states = []
     for station in stations:
         metrics = collect_station(station, config.log_tail_lines, now)
-        state = build_state(metrics, config.thresholds, config.host_name, _iso(now))
+        state = build_state(metrics, config.thresholds, config.host_name, _iso(now), disabled)
         state["group"] = _station_group(station, config)
         states.append(state)
     return states
@@ -37,8 +38,10 @@ def gather(config):
 def gather_host(config):
     """Build the host-wide (OS) state dict."""
     stations = discover_stations(config.stations_dir, config.rms_dir)
+    disabled = set(config.disabled_checks or [])
     metrics = collect_host()
-    state = build_host_state(metrics, config.thresholds, config.host_name, _iso(time.time()))
+    state = build_host_state(metrics, config.thresholds, config.host_name,
+                             _iso(time.time()), disabled)
     # A host can span several groups; list the distinct ones plus its stations,
     # so the bridge can fan a host-level (OOM) alert out to each.
     state["groups"] = sorted({g for g in (_station_group(s, config) for s in stations) if g})

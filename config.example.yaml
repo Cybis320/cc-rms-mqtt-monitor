@@ -38,6 +38,12 @@ host_name: null           # defaults to the system hostname
 # a FALLBACK, applied to stations whose camera_group_name is unset ("none").
 group: null
 
+# Health checks to silence (by key), e.g. [dropped_frames, upload_backlog].
+# Empty = all on. Keys: capture_down, capture_stalled, detection_stalled,
+# log_fatal, watchdog, disk_low, upload_backlog, clock_unsynced,
+# clock_uncertainty, dropped_frames, oom, host_memory.
+disabled_checks: []
+
 thresholds:
   output_fresh_error_s: 300    # error if no output (FF at night / frames by day)
                                # for this long; generous to ride mode switches

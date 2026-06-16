@@ -87,6 +87,9 @@ class Config:
     # for stations whose camera_group_name is unset ("none").
     group: str = None
 
+    # Health checks to silence, by key (see health.CHECK_KEYS). Empty = all on.
+    disabled_checks: list = field(default_factory=list)
+
     def __post_init__(self):
         if not self.host_name:
             self.host_name = socket.gethostname()
