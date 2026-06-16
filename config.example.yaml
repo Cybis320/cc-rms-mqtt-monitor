@@ -40,8 +40,8 @@ group: null
 
 # Health checks to silence (by key), e.g. [dropped_frames, upload_backlog].
 # Empty = all on. Keys: capture_down, capture_stalled, detection_stalled,
-# log_fatal, watchdog, disk_low, upload_backlog, clock_unsynced,
-# clock_uncertainty, dropped_frames, oom, host_memory.
+# timelapse_missing, log_fatal, watchdog, disk_low, upload_backlog,
+# clock_unsynced, clock_uncertainty, dropped_frames, oom, host_memory.
 disabled_checks: []
 
 thresholds:
@@ -49,6 +49,7 @@ thresholds:
                                # for this long; generous to ride mode switches
   capture_active_window_s: 3600
   detection_grace_s: 1800
+  timelapse_grace_s: 1800      # grace before flagging a missing timelapse mp4
   disk_free_warn_gb: 20
   disk_free_error_gb: 5
   upload_queue_warn: 50

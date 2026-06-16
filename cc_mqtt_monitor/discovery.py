@@ -42,6 +42,7 @@ class Station:
     continuous_capture: bool = False
     switch_camera_modes: bool = False
     save_frames: bool = True
+    timelapse_generate_from_frames: bool = True
     latitude: float = 0.0
     longitude: float = 0.0
     elevation: float = 0.0
@@ -130,6 +131,8 @@ def _station_from_config(config_path):
         continuous_capture=_as_bool(cfg.get("continuous_capture")),
         switch_camera_modes=_as_bool(cfg.get("switch_camera_modes")),
         save_frames=_as_bool(cfg.get("save_frames"), default=True),
+        timelapse_generate_from_frames=_as_bool(
+            cfg.get("timelapse_generate_from_frames"), default=True),
         latitude=latitude,
         longitude=longitude,
         elevation=elevation,

@@ -173,6 +173,44 @@ def collect_frames(station, now=None):
 
 
 # ---------------------------------------------------------------------------
+# Timelapse mp4 (silent-failure class: frame session done but no mp4)
+# ---------------------------------------------------------------------------
+
+# A failed ffmpeg can leave a 0-byte / stub file, so require a real size.
+_MIN_TIMELAPSE_BYTES = 1024
+
+
+def collect_timelapse(station, now=None):
+    """Did the most recent completed frame session produce a timelapse mp4?
+
+    RMS writes <id>_<start>_to_<end>_frametimes.json as it processes a frame
+    session (before ffmpeg finalizes), and the matching ..._frames_timelapse.mp4
+    on success. An ffmpeg failure leaves the json but no (or a stub) mp4, and is
+    only logged as a WARNING -- so this outcome check is the way to catch it.
+    """
+    result = {"timelapse_mp4_present": None, "timelapse_session_age_s": None}
+    if not (station.save_frames and station.timelapse_generate_from_frames):
+        return result
+    now = now or time.time()
+
+    suffix = "_frametimes.json"
+    jsons = glob.glob(os.path.join(station.frames_path, "*" + suffix))
+    if not jsons:
+        return result
+
+    newest = max(jsons, key=_safe_mtime)
+    result["timelapse_session_age_s"] = round(now - _safe_mtime(newest), 1)
+    prefix = os.path.basename(newest)[:-len(suffix)]
+    mp4 = os.path.join(station.frames_path, prefix + "_frames_timelapse.mp4")
+    try:
+        result["timelapse_mp4_present"] = (
+            os.path.isfile(mp4) and os.path.getsize(mp4) > _MIN_TIMELAPSE_BYTES)
+    except OSError:
+        result["timelapse_mp4_present"] = False
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Detection output (silent-failure class: alive + capturing but no output)
 # ---------------------------------------------------------------------------
 
@@ -449,6 +487,7 @@ def collect_station(station, max_log_lines, now=None):
     metrics.update(collect_process(station))
     metrics.update(collect_capture(station, now))
     metrics.update(collect_frames(station, now))
+    metrics.update(collect_timelapse(station, now))
     metrics.update(collect_detection(station, now))
     metrics.update(collect_logs(station, max_log_lines))
     metrics.update(collect_summary(station))

@@ -24,6 +24,7 @@ CHECK_KEYS = (
     "capture_down",       # capture process for the station not running
     "capture_stalled",    # no FF (night) / no frames (day) within the threshold
     "detection_stalled",  # capturing but no FTPdetectinfo/CALSTARS produced
+    "timelapse_missing",  # frame session done but no timelapse mp4 produced
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
     "watchdog",           # RMS WATCHDOG died/stale/Restarting event
     "disk_low",           # data partition low / critically low
@@ -102,6 +103,13 @@ def evaluate(metrics, thresholds, disabled=()):
     ):
         flag(ERROR, "detection_stalled",
              "Detection pipeline produced no output after %.0fs of capture" % session_age)
+
+    # --- Timelapse mp4 not generated (silent ffmpeg failure) -------------
+    tl_age = metrics.get("timelapse_session_age_s")
+    if (tl_age is not None and tl_age >= thresholds.timelapse_grace_s
+            and metrics.get("timelapse_mp4_present") is False):
+        flag(DEGRADED, "timelapse_missing",
+             "Timelapse mp4 not generated for the last frame session (%.0fs ago)" % tl_age)
 
     # --- Fatal log errors / tracebacks -----------------------------------
     if metrics.get("fatal_error_count"):

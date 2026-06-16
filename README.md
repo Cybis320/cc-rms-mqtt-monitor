@@ -60,6 +60,7 @@ the human-readable text.
 | `capture_down` | error | the station's `RMS.StartCapture` process isn't running | — |
 | `capture_stalled` | error | expected output is stale — no FF (night) or no frame (continuous day) | `output_fresh_error_s` (300s) |
 | `detection_stalled` | error | capturing FF but no `FTPdetectinfo`/`CALSTARS` produced | `detection_grace_s` (1800s) |
+| `timelapse_missing` | degraded | a completed frame session produced no `_frames_timelapse.mp4` (silent ffmpeg failure) | `timelapse_grace_s` (1800s) |
 | `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault in the log | — |
 | `watchdog` | degraded | RMS `WATCHDOG: died/stale/Restarting` event | — |
 | `disk_low` | degraded / error | data partition free space low / critical | `disk_free_warn_gb` (20) / `disk_free_error_gb` (5) |

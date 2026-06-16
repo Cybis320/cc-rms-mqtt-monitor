@@ -49,6 +49,8 @@ class Thresholds:
     # Grace period after a capture dir appears before missing detection output
     # (FTPdetectinfo / CALSTARS) is treated as a stalled-pipeline problem.
     detection_grace_s: int = 1800
+    # Grace after a frame session before a missing timelapse mp4 is flagged.
+    timelapse_grace_s: int = 1800
     disk_free_warn_gb: float = 20.0
     disk_free_error_gb: float = 5.0
     upload_queue_warn: int = 50
