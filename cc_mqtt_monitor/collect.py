@@ -188,25 +188,42 @@ def collect_timelapse(station, now=None):
     on success. An ffmpeg failure leaves the json but no (or a stub) mp4, and is
     only logged as a WARNING -- so this outcome check is the way to catch it.
     """
-    result = {"timelapse_mp4_present": None, "timelapse_session_age_s": None}
+    result = {
+        "timelapse_mp4_present": None,    # newest session's mp4 present (ran-but-failed)
+        "timelapse_session_age_s": None,  # age of newest session marker (json)
+        "newest_timelapse_age_s": None,   # age of newest timelapse mp4 anywhere
+        "frames_data_age_s": None,        # age of oldest frame data on disk
+    }
     if not (station.save_frames and station.timelapse_generate_from_frames):
         return result
     now = now or time.time()
+    fp = station.frames_path
 
+    # Newest completed session (json written even when ffmpeg fails) + its mp4.
     suffix = "_frametimes.json"
-    jsons = glob.glob(os.path.join(station.frames_path, "*" + suffix))
-    if not jsons:
-        return result
+    jsons = glob.glob(os.path.join(fp, "*" + suffix))
+    if jsons:
+        newest = max(jsons, key=_safe_mtime)
+        result["timelapse_session_age_s"] = round(now - _safe_mtime(newest), 1)
+        prefix = os.path.basename(newest)[:-len(suffix)]
+        mp4 = os.path.join(fp, prefix + "_frames_timelapse.mp4")
+        try:
+            result["timelapse_mp4_present"] = (
+                os.path.isfile(mp4) and os.path.getsize(mp4) > _MIN_TIMELAPSE_BYTES)
+        except OSError:
+            result["timelapse_mp4_present"] = False
 
-    newest = max(jsons, key=_safe_mtime)
-    result["timelapse_session_age_s"] = round(now - _safe_mtime(newest), 1)
-    prefix = os.path.basename(newest)[:-len(suffix)]
-    mp4 = os.path.join(station.frames_path, prefix + "_frames_timelapse.mp4")
-    try:
-        result["timelapse_mp4_present"] = (
-            os.path.isfile(mp4) and os.path.getsize(mp4) > _MIN_TIMELAPSE_BYTES)
-    except OSError:
-        result["timelapse_mp4_present"] = False
+    # Newest timelapse mp4 of any session (for the "none being generated" check).
+    mp4s = glob.glob(os.path.join(fp, "*_frames_timelapse.mp4"))
+    if mp4s:
+        result["newest_timelapse_age_s"] = round(now - max(_safe_mtime(m) for m in mp4s), 1)
+
+    # Oldest frame data on disk (FramesFiles/<year>/<date>/...), so a station
+    # that has accumulated frames for ages but produced no mp4 is still caught.
+    date_dirs = [d for d in glob.glob(os.path.join(fp, "[0-9][0-9][0-9][0-9]", "*"))
+                 if os.path.isdir(d)]
+    if date_dirs:
+        result["frames_data_age_s"] = round(now - min(_safe_mtime(d) for d in date_dirs), 1)
     return result
 
 

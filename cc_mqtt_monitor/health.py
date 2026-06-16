@@ -24,7 +24,8 @@ CHECK_KEYS = (
     "capture_down",       # capture process for the station not running
     "capture_stalled",    # no FF (night) / no frames (day) within the threshold
     "detection_stalled",  # capturing but no FTPdetectinfo/CALSTARS produced
-    "timelapse_missing",  # frame session done but no timelapse mp4 produced
+    "timelapse_missing",  # a finished frame session's ffmpeg failed (no mp4)
+    "timelapse_overdue",  # saving frames but no timelapse mp4 produced in ages
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
     "watchdog",           # RMS WATCHDOG died/stale/Restarting event
     "disk_low",           # data partition low / critically low
@@ -104,12 +105,29 @@ def evaluate(metrics, thresholds, disabled=()):
         flag(ERROR, "detection_stalled",
              "Detection pipeline produced no output after %.0fs of capture" % session_age)
 
-    # --- Timelapse mp4 not generated (silent ffmpeg failure) -------------
+    # --- Timelapse mp4 not generated -------------------------------------
+    # (a) ran but ffmpeg failed: a finished session's json exists, mp4 doesn't.
     tl_age = metrics.get("timelapse_session_age_s")
     if (tl_age is not None and tl_age >= thresholds.timelapse_grace_s
             and metrics.get("timelapse_mp4_present") is False):
         flag(DEGRADED, "timelapse_missing",
              "Timelapse mp4 not generated for the last frame session (%.0fs ago)" % tl_age)
+
+    # (b) not generating at all: frames are actively being saved, but no mp4 has
+    # appeared in ages (or none ever, despite frames piling up). Latitude-
+    # independent -- a polar site that should make mp4s but doesn't is caught.
+    if frame_age is not None and frame_age <= thresholds.output_fresh_error_s:
+        newest_tl = metrics.get("newest_timelapse_age_s")
+        frames_data = metrics.get("frames_data_age_s")
+        overdue = None
+        if newest_tl is not None:
+            if newest_tl > thresholds.timelapse_max_age_s:
+                overdue = newest_tl
+        elif frames_data is not None and frames_data > thresholds.timelapse_max_age_s:
+            overdue = frames_data  # frames accumulating but no mp4 ever produced
+        if overdue is not None:
+            flag(DEGRADED, "timelapse_overdue",
+                 "No timelapse mp4 generated in %.1fh while saving frames" % (overdue / 3600.0))
 
     # --- Fatal log errors / tracebacks -----------------------------------
     if metrics.get("fatal_error_count"):

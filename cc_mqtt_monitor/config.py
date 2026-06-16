@@ -51,6 +51,10 @@ class Thresholds:
     detection_grace_s: int = 1800
     # Grace after a frame session before a missing timelapse mp4 is flagged.
     timelapse_grace_s: int = 1800
+    # Max time a frame-saving station may go without ANY new timelapse mp4
+    # before flagging (catches timelapses that never run at all, incl. polar).
+    # Must exceed the longest normal gap between sessions (~a day).
+    timelapse_max_age_s: int = 108000   # 30 h
     disk_free_warn_gb: float = 20.0
     disk_free_error_gb: float = 5.0
     upload_queue_warn: int = 50
