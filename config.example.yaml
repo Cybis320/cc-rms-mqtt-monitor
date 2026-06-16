@@ -26,12 +26,9 @@ rms_dir: ~/source/RMS
 #   <topic_prefix>/<station>/health   retained per-station JSON state blob
 topic_prefix: stations
 
-# Home Assistant MQTT Discovery (auto-creates entities). Off by default — the
-# contrailcast network uses ntfy + Telegram for alerting (a broker-side consumer
-# of the stations/<id>/health topics), not Home Assistant. Set true (and point
-# HA's MQTT discovery prefix at ha_discovery_prefix) only if you use HA.
-ha_discovery_enabled: false
-ha_discovery_prefix: stations/homeassistant
+# Alerting is via a broker-side ntfy + Telegram consumer of the
+# stations/<id>/health topics. Home Assistant MQTT Discovery is supported but
+# OFF by default — to enable it set ha_discovery_enabled: true (see README).
 
 interval_seconds: 60
 log_tail_lines: 4000
