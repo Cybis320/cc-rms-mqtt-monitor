@@ -53,6 +53,8 @@ class Thresholds:
     disk_free_error_gb: float = 5.0
     upload_queue_warn: int = 50
     clock_error_warn_ms: float = 100.0
+    # Dropped frames in the last 10 min before warning (a few are normal).
+    dropped_frames_warn: int = 10
     # Host memory headroom (MB) before warning / erroring.
     mem_available_warn_mb: int = 800
     mem_available_error_mb: int = 300

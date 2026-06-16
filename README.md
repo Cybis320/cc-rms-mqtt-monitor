@@ -66,7 +66,7 @@ the human-readable text.
 | `upload_backlog` | degraded | upload queue length over threshold | `upload_queue_warn` (50) |
 | `clock_unsynced` | degraded | last summary reported clock not synchronized | — |
 | `clock_uncertainty` | degraded | last summary clock error over threshold | `clock_error_warn_ms` (100) |
-| `dropped_frames` | degraded | dropped frames in the last 10 min | > 0 |
+| `dropped_frames` | degraded | dropped frames in the last 10 min | `dropped_frames_warn` (10) |
 | `oom` | error (python victim) / degraded | host OOM-killer fired (kernel log) | — |
 | `host_memory` | degraded / error | host available memory low / critical | `mem_available_warn_mb` (800) / `..._error_mb` (300) |
 

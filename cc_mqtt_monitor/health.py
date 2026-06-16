@@ -136,10 +136,11 @@ def evaluate(metrics, thresholds, disabled=()):
         except (TypeError, ValueError):
             pass
 
-    # --- Dropped frames --------------------------------------------------
-    if metrics.get("dropped_frames_10min"):
+    # --- Dropped frames (a few are normal; warn only past the threshold) -
+    dropped = metrics.get("dropped_frames_10min") or 0
+    if dropped >= thresholds.dropped_frames_warn:
         flag(DEGRADED, "dropped_frames",
-             "Dropped %d frames in last 10 min" % metrics["dropped_frames_10min"])
+             "Dropped %d frames in last 10 min" % dropped)
 
     return state["status"], state["problems"]
 

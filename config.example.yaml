@@ -53,5 +53,6 @@ thresholds:
   disk_free_error_gb: 5
   upload_queue_warn: 50
   clock_error_warn_ms: 100
+  dropped_frames_warn: 10      # dropped frames per 10 min before warning
   mem_available_warn_mb: 800   # host RAM headroom (OOM early warning)
   mem_available_error_mb: 300
