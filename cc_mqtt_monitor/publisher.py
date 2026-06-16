@@ -43,7 +43,18 @@ class Publisher:
         if announce:
             # Last Will: if we drop uncleanly, the broker marks us down.
             self.client.will_set(self.host_status_topic, "offline", qos=1, retain=True)
+            # Re-assert "online" on every (re)connect (see _on_connect).
+            self.client.on_connect = self._on_connect
         self._pending = []
+
+    def _on_connect(self, client, userdata, flags, rc, *args):
+        # Republish "online" on every successful (re)connect, so the status topic
+        # is correct again after a reconnect -- the broker will have published our
+        # Last-Will "offline" while we were gone. (Retained health messages
+        # survive on the broker and refresh next cycle, so nothing else needs
+        # re-sending; HA discovery was removed.)
+        if rc == 0:
+            client.publish(self.host_status_topic, "online", qos=1, retain=True)
 
     def connect(self):
         self.client.connect(
@@ -52,9 +63,8 @@ class Publisher:
             keepalive=self.config.broker.keepalive,
         )
         self.client.loop_start()
-        if self.announce:
-            self._publish(self.host_status_topic, "online")
-            self.flush()
+        # "online" is published by _on_connect, which fires on this initial
+        # connect and on every automatic reconnect.
 
     def _state_topic(self, station_id):
         return "%s/%s/health" % (self.config.topic_prefix, station_id)
