@@ -50,7 +50,8 @@ thresholds:
                                # for this long; generous to ride mode switches
   capture_active_window_s: 3600
   detection_grace_s: 1800
-  timelapse_grace_s: 1800      # grace before flagging a failed session's missing mp4
+  timelapse_grace_s: 3600      # 1h grace before flagging a session's missing mp4
+                               # (encoding is slow on weak multicam machines)
   timelapse_max_age_s: 108000  # 30h; flag if no mp4 at all while saving frames
   disk_free_warn_gb: 20
   disk_free_error_gb: 5

@@ -50,7 +50,8 @@ class Thresholds:
     # (FTPdetectinfo / CALSTARS) is treated as a stalled-pipeline problem.
     detection_grace_s: int = 1800
     # Grace after a frame session before a missing timelapse mp4 is flagged.
-    timelapse_grace_s: int = 1800
+    # Generous: encoding can take a long time on weak multicam machines.
+    timelapse_grace_s: int = 3600
     # Max time a frame-saving station may go without ANY new timelapse mp4
     # before flagging (catches timelapses that never run at all, incl. polar).
     # Must exceed the longest normal gap between sessions (~a day).
