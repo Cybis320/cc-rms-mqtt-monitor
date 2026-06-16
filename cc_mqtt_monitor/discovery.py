@@ -35,6 +35,9 @@ class Station:
     log_dir: str
     upload_queue_file: str
     frame_dir: str = "FramesFiles"
+    # Operator-defined grouping straight from the RMS .config (camera cluster /
+    # location). None when unset ("none"). This is the primary subscription group.
+    camera_group_name: str = None
     # Capture mode / location, used to know what output to expect when.
     continuous_capture: bool = False
     switch_camera_modes: bool = False
@@ -105,6 +108,10 @@ def _station_from_config(config_path):
     latitude = _as_float(cfg.get("latitude", cfg.get("lat")))
     longitude = _as_float(cfg.get("longitude", cfg.get("lon")))
 
+    # camera_group_name: treat "none"/blank as unset.
+    group = (cfg.get("camera_group_name") or "").strip()
+    camera_group_name = group if group and group.lower() != "none" else None
+
     return Station(
         station_id=station_id,
         config_path=os.path.abspath(config_path),
@@ -114,6 +121,7 @@ def _station_from_config(config_path):
         log_dir=cfg.get("log_dir", _DEFAULTS["log_dir"]),
         upload_queue_file=cfg.get("upload_queue_file", _DEFAULTS["upload_queue_file"]),
         frame_dir=cfg.get("frame_dir", "FramesFiles"),
+        camera_group_name=camera_group_name,
         continuous_capture=_as_bool(cfg.get("continuous_capture")),
         switch_camera_modes=_as_bool(cfg.get("switch_camera_modes")),
         save_frames=_as_bool(cfg.get("save_frames"), default=True),

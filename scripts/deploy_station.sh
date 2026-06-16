@@ -55,37 +55,34 @@ info "Installing package + dependencies"
 "$PY" -m pip install --quiet -e "$DEST"
 
 # --- 3. Config --------------------------------------------------------------
-# Sanitize to characters safe in a topic/ntfy name and in our sed substitution.
 sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9_.-'; }
 
 if [ ! -f "$DEST/config.yaml" ]; then
     cp "$DEST/config.example.yaml" "$DEST/config.yaml"
 
-    # Ask for the subscription group + tags. Read from the controlling terminal
-    # so this works even under `curl ... | bash` (where stdin is the script).
-    # Pre-seed non-interactively with CC_GROUP / CC_TAGS.
-    GROUP="$(sanitize "${CC_GROUP:-}")"
-    TAGS_RAW="${CC_TAGS:-}"
-    if [ -z "$GROUP" ] && [ -r /dev/tty ]; then
-        read -rp "Subscription group for this host (your operator handle, e.g. 'luc'): " GROUP < /dev/tty || true
-        GROUP="$(sanitize "$GROUP")"
+    # Subscription group comes from each station's camera_group_name in its RMS
+    # .config — read automatically at runtime, nothing to enter. Detect it here
+    # just to confirm, and only offer a fallback if no station has one set.
+    STATIONS_DIR="${CC_STATIONS_DIR:-$HOME/source/Stations}"
+    RMS_DIR="${CC_RMS_DIR:-$HOME/source/RMS}"
+    DETECTED="$(grep -hE '^[[:space:]]*camera_group_name:' \
+                    "$STATIONS_DIR"/*/.config "$RMS_DIR/.config" 2>/dev/null \
+                | sed -E 's/^[[:space:]]*camera_group_name:[[:space:]]*//; s/[[:space:]]*$//' \
+                | grep -viE '^(none)?$' | sort -u | paste -sd ',' -)"
+
+    if [ -n "$DETECTED" ]; then
+        info "Using camera_group_name from RMS config: ${DETECTED}"
+    else
+        # No camera_group_name set anywhere; offer a fallback group.
+        GROUP="$(sanitize "${CC_GROUP:-}")"
+        if [ -z "$GROUP" ] && [ -r /dev/tty ]; then
+            echo "No camera_group_name found in your RMS station configs."
+            read -rp "Fallback subscription group for this host (optional, blank to skip): " GROUP < /dev/tty || true
+            GROUP="$(sanitize "$GROUP")"
+        fi
+        [ -n "$GROUP" ] && sed -i "s|^group:.*|group: $GROUP|" "$DEST/config.yaml"
+        info "Created config.yaml (fallback group='${GROUP:-none}')"
     fi
-    if [ -z "$TAGS_RAW" ] && [ -r /dev/tty ]; then
-        read -rp "Extra tags, comma-separated (optional, e.g. 'USC,contrail'): " TAGS_RAW < /dev/tty || true
-    fi
-
-    # Build a YAML flow list from the comma-separated tags, sanitizing each.
-    TAGS_YAML=""
-    IFS=',' read -ra _tags <<< "$TAGS_RAW"
-    for t in "${_tags[@]}"; do
-        t="$(sanitize "$t")"
-        [ -n "$t" ] && TAGS_YAML="${TAGS_YAML:+$TAGS_YAML, }$t"
-    done
-
-    [ -n "$GROUP" ]     && sed -i "s|^group:.*|group: $GROUP|"        "$DEST/config.yaml"
-    [ -n "$TAGS_YAML" ] && sed -i "s|^tags:.*|tags: [$TAGS_YAML]|"    "$DEST/config.yaml"
-
-    info "Created config.yaml (group='${GROUP:-none}', tags=[${TAGS_YAML}])"
 else
     info "Keeping existing config.yaml"
 fi

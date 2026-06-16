@@ -37,10 +37,10 @@ interval_seconds: 60
 log_tail_lines: 4000
 host_name: null           # defaults to the system hostname
 
-# Subscription grouping (attached to every published record so the ntfy/Telegram
-# bridge can route alerts). The installer prompts for these.
-group: null               # operator/owner label; subscribers use cc-<group>
-tags: []                  # extra labels, e.g. [USC, contrail]
+# Subscription group for the alert bridge. The PRIMARY source is each station's
+# `camera_group_name` in its RMS .config (read automatically). This value is only
+# a FALLBACK, applied to stations whose camera_group_name is unset ("none").
+group: null
 
 thresholds:
   fits_fresh_warn_s: 30

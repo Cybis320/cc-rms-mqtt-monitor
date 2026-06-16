@@ -93,13 +93,10 @@ class Config:
     # Identifier for this host (defaults to the system hostname).
     host_name: str = None
 
-    # Subscription grouping for the alert bridge (ntfy/Telegram). Both are
-    # attached to every station and host record this monitor publishes, so the
-    # bridge can route alerts to cc-<group> / cc-<tag>. `group` is the operator's
-    # own bucket (their stations regardless of ID); `tags` are extra labels
-    # (network, project, region, ...).
+    # Fallback subscription group for the alert bridge. The primary source is
+    # each station's `camera_group_name` in its RMS .config; this is only used
+    # for stations whose camera_group_name is unset ("none").
     group: str = None
-    tags: list = field(default_factory=list)
 
     def __post_init__(self):
         if not self.host_name:

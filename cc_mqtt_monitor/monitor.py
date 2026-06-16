@@ -15,23 +15,23 @@ def _iso(ts):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
 
 
-def _grouping(config):
-    """Subscription labels attached to every record for the alert bridge."""
-    return {"group": config.group, "tags": list(config.tags or [])}
+def _station_group(station, config):
+    """Subscription group: the station's RMS camera_group_name, or the monitor
+    config's `group` as a fallback when the RMS field is unset."""
+    return station.camera_group_name or config.group
 
 
 def gather(config):
     """Discover stations and build a state dict for each (no MQTT involved)."""
     stations = discover_stations(config.stations_dir, config.rms_dir)
     now = time.time()
-    grouping = _grouping(config)
     states = []
     for station in stations:
         metrics = collect_station(
             station, config.log_tail_lines,
             config.thresholds.night_horizon_deg, now)
         state = build_state(metrics, config.thresholds, config.host_name, _iso(now))
-        state.update(grouping)
+        state["group"] = _station_group(station, config)
         states.append(state)
     return states
 
@@ -41,9 +41,9 @@ def gather_host(config):
     stations = discover_stations(config.stations_dir, config.rms_dir)
     metrics = collect_host()
     state = build_host_state(metrics, config.thresholds, config.host_name, _iso(time.time()))
-    state.update(_grouping(config))
-    # The stations on this host let the bridge fan a host-level (OOM) alert out
-    # to every network these cameras belong to.
+    # A host can span several groups; list the distinct ones plus its stations,
+    # so the bridge can fan a host-level (OOM) alert out to each.
+    state["groups"] = sorted({g for g in (_station_group(s, config) for s in stations) if g})
     state["station_ids"] = [s.station_id for s in stations]
     return state
 
