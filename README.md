@@ -111,6 +111,8 @@ Example `health` payload:
   "status": "error",
   "problems": ["Detection pipeline produced no output after 2100s of capture",
                "Fatal error in log (3x): ImportError: ... cannot open shared object file"],
+  "group": "Elginfield Contrail Cameras",
+  "group_slug": "Elginfield-Contrail-Cameras",
   "capture_alive": true,
   "newest_fits_age_s": 8.2,
   "fits_count": 210,
@@ -123,6 +125,11 @@ Example `health` payload:
   "timestamp": "2026-06-15T17:40:00Z"
 }
 ```
+
+`group` is the human-readable label (RMS `camera_group_name`); **`group_slug`**
+is the canonical subscription handle — spaces/punctuation collapsed to `-` so it
+is valid as an ntfy topic / Telegram tag. The bridge fans alerts to `cc-<group_slug>`
+(the host record carries `groups` + `group_slugs` lists for its stations).
 
 ## Install
 

@@ -1,5 +1,6 @@
 """The collect -> evaluate -> publish loop."""
 
+import re
 import time
 import logging
 
@@ -13,6 +14,15 @@ log = logging.getLogger("cc_mqtt_monitor")
 
 def _iso(ts):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _slug(name):
+    """Canonical subscription handle from a group label: a multi-word name like
+    'Elginfield Contrail Cameras' -> 'Elginfield-Contrail-Cameras' (valid as an
+    ntfy topic / Telegram tag, which can't contain spaces)."""
+    if not name:
+        return None
+    return re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-") or None
 
 
 def _station_group(station, config):
@@ -30,7 +40,9 @@ def gather(config):
     for station in stations:
         metrics = collect_station(station, config.log_tail_lines, now)
         state = build_state(metrics, config.thresholds, config.host_name, _iso(now), disabled)
-        state["group"] = _station_group(station, config)
+        group = _station_group(station, config)
+        state["group"] = group               # human-readable label
+        state["group_slug"] = _slug(group)   # canonical subscription handle
         states.append(state)
     return states
 
@@ -44,7 +56,9 @@ def gather_host(config):
                              _iso(time.time()), disabled)
     # A host can span several groups; list the distinct ones plus its stations,
     # so the bridge can fan a host-level (OOM) alert out to each.
-    state["groups"] = sorted({g for g in (_station_group(s, config) for s in stations) if g})
+    groups = sorted({g for g in (_station_group(s, config) for s in stations) if g})
+    state["groups"] = groups
+    state["group_slugs"] = [_slug(g) for g in groups]
     state["station_ids"] = [s.station_id for s in stations]
     return state
 
@@ -77,7 +91,19 @@ def run_loop(config, publisher):
     else:
         log.info("Could not lower oom_score_adj; rely on systemd OOMScoreAdjust")
 
-    publisher.connect()
+    # Retry the initial broker connection with backoff, so a transient network/
+    # broker issue at boot (DNS not ready, broker restarting) just retries
+    # instead of crashing the service. paho's loop auto-reconnects after this.
+    backoff = 5
+    while True:
+        try:
+            publisher.connect()
+            break
+        except Exception as exc:
+            log.warning("Broker connect to %s:%d failed (%s); retrying in %ds",
+                        config.broker.host, config.broker.port, exc, backoff)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 60)
     log.info("Connected to %s:%d; monitoring every %ds",
              config.broker.host, config.broker.port, config.interval_seconds)
     try:
