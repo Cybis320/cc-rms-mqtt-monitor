@@ -33,6 +33,8 @@ def main(argv=None):
                         help="print station health as JSON locally (no MQTT)")
     parser.add_argument("--viewer", action="store_true",
                         help="subscribe to the broker and show a live status table")
+    parser.add_argument("--test", action="store_true",
+                        help="publish one test alert to exercise the broker->ntfy/Telegram chain, then exit")
     parser.add_argument("--interval", type=int,
                         help="override the polling interval in seconds")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -55,6 +57,26 @@ def main(argv=None):
     if args.viewer:
         from .viewer import Viewer
         Viewer(config).run()
+        return 0
+
+    # --test: publish one transient test alert (no host-status side effects).
+    if args.test:
+        from .publisher import Publisher
+        state = monitor.make_test_state(config)
+        publisher = Publisher(config, announce=False)
+        publisher.connect()
+        try:
+            publisher.publish_test(state)
+        finally:
+            publisher.disconnect()
+        sid, gs = state["station_id"], state.get("group_slug")
+        logging.getLogger("cc_mqtt_monitor").info(
+            "Test alert published to %s/%s/health (non-retained).",
+            config.topic_prefix, sid)
+        print("Test alert sent. Subscribers should receive it on:")
+        if gs:
+            print("    cc-%s        (your group)" % gs)
+        print("    cc-%s   (this station) and any prefix, e.g. cc-%s" % (sid, sid[:3]))
         return 0
 
     # Publishing paths need paho + a broker.

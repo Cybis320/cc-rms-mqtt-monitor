@@ -63,6 +63,32 @@ def gather_host(config):
     return state
 
 
+def make_test_state(config):
+    """A clearly-marked test alert that routes like a real one: it carries this
+    host's actual group_slug and a station_id derived from a real station (so it
+    reaches both cc-<group_slug> and the network's cc-<prefix> subscribers),
+    without clobbering any real station's retained state."""
+    stations = discover_stations(config.stations_dir, config.rms_dir)
+    now = time.time()
+    if stations:
+        base_id = stations[0].station_id
+        group = _station_group(stations[0], config)
+    else:
+        base_id = config.host_name
+        group = config.group
+    return {
+        "station_id": "%s-TEST" % base_id,
+        "status": "degraded",
+        "problems": ["\U0001F514 Test alert from %s at %s -- if you received this, the "
+                     "MQTT -> ntfy/Telegram chain works." % (config.host_name, _iso(now))],
+        "group": group,
+        "group_slug": _slug(group),
+        "test": True,
+        "host": config.host_name,
+        "timestamp": _iso(now),
+    }
+
+
 def run_once(config, publisher=None):
     """Collect host + every station once and (optionally) publish."""
     host_state = gather_host(config)

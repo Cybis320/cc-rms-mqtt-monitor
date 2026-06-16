@@ -23,19 +23,26 @@ def _make_client(client_id):
 
 
 class Publisher:
-    def __init__(self, config):
+    def __init__(self, config, announce=True):
+        # announce=False: a transient publisher (e.g. --test) that must NOT touch
+        # the host status topic or collide with the running service -- so no
+        # Last-Will, no online/offline, and a distinct client id.
         self.config = config
+        self.announce = announce
         self.host_status_topic = "%s/%s/status" % (
             config.topic_prefix, config.host_name)
-        self.client = _make_client(
-            "%s-%s" % (config.broker.client_id_prefix, config.host_name))
+        client_id = "%s-%s" % (config.broker.client_id_prefix, config.host_name)
+        if not announce:
+            client_id += "-test"
+        self.client = _make_client(client_id)
         if config.broker.username:
             self.client.username_pw_set(
                 config.broker.username, config.broker.password)
         if config.broker.tls:
             self.client.tls_set()
-        # Last Will: if we drop without a clean disconnect, broker marks us down.
-        self.client.will_set(self.host_status_topic, "offline", qos=1, retain=True)
+        if announce:
+            # Last Will: if we drop uncleanly, the broker marks us down.
+            self.client.will_set(self.host_status_topic, "offline", qos=1, retain=True)
         self._pending = []
 
     def connect(self):
@@ -45,8 +52,9 @@ class Publisher:
             keepalive=self.config.broker.keepalive,
         )
         self.client.loop_start()
-        self._publish(self.host_status_topic, "online")
-        self.flush()
+        if self.announce:
+            self._publish(self.host_status_topic, "online")
+            self.flush()
 
     def _state_topic(self, station_id):
         return "%s/%s/health" % (self.config.topic_prefix, station_id)
@@ -80,10 +88,16 @@ class Publisher:
     def publish_host_state(self, state):
         self._publish(self._host_state_topic(), json.dumps(state, default=str))
 
-    def disconnect(self, mark_offline=True):
-        # Flush queued state first, then (optionally) mark offline and confirm it.
+    def publish_test(self, state):
+        # Non-retained so it doesn't linger on the broker; routed by payload.
+        self._publish(self._state_topic(state["station_id"]),
+                      json.dumps(state, default=str), retain=False)
         self.flush()
-        if mark_offline:
+
+    def disconnect(self):
+        self.flush()
+        # Only the announcing (long-running) publisher owns the host status.
+        if self.announce:
             self._publish(self.host_status_topic, "offline")
             self.flush()
         self.client.loop_stop()

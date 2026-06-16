@@ -224,7 +224,16 @@ python -m cc_mqtt_monitor --config config.yaml
 
 # Watch a live multi-station table by subscribing to the broker:
 python -m cc_mqtt_monitor --config config.yaml --viewer
+
+# Send one test alert to check the whole broker -> ntfy/Telegram chain:
+python -m cc_mqtt_monitor --config config.yaml --test
 ```
+
+`--test` publishes a single, non-retained, clearly-marked alert carrying this
+host's real `group_slug` and a `<station>-TEST` id, so it routes to your normal
+subscriptions (`cc-<group_slug>` and the network `cc-<prefix>`). It uses a
+separate client id and no Last-Will, so it never disturbs the running service's
+status. If you receive it in ntfy/Telegram, the chain works.
 
 Run as a service: see `systemd/cc-rms-monitor.service`.
 

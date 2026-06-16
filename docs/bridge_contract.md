@@ -85,7 +85,15 @@ matches each alert:
 - prefix tokens (e.g. `USC`) give the same "subscribe once, future stations
   auto-covered" behavior as ntfy.
 
-## 7. Notes
+## 7. Test alerts
+
+`cc-rms-monitor --test` publishes a one-off, **non-retained** station record with
+`"test": true`, `status: "degraded"`, a `<station>-TEST` id, and the host's real
+`group_slug`. Route it exactly like a normal alert (so the operator confirms the
+chain) — optionally tag it as a test / lower priority, and **don't** persist it
+in your notify-on-change state (the id never recovers).
+
+## 8. Notes
 
 - Open/anonymous broker, plaintext 1883, `stations/#` only.
 - Treat a station as stale if its host's `status` is `offline` or its
