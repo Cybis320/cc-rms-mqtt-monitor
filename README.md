@@ -138,13 +138,17 @@ The bridge fans each alert out to several topics, so you pick the granularity:
 |---|---|
 | `cc-<group_slug>` | your whole group (e.g. `cc-Phoenix-1`) |
 | `cc-<stationID>` | one camera (e.g. `cc-US005A`) |
-| `cc-<prefix>` | **a whole network** — *any leading prefix of a station ID* (`cc-USC`, `cc-CAC`, `cc-UV`, `cc-USL`, …) |
+| `cc-<prefix>` | **a whole network** — any leading prefix of a station ID **of 3+ characters** (`cc-USC`, `cc-CAC`, `cc-USL`, `cc-USV`, …) |
 
 The prefix axis is the important one for network coordinators: subscribe to
 `cc-USC` (or `cc-CAC`, …) **once**, and every current *and future* station whose
 ID starts with that prefix is covered automatically — no ntfy change is needed
 when a new station is deployed, because the bridge publishes each station's
-alerts to all prefixes of its ID as soon as its monitor comes online.
+alerts to all of its ID prefixes (from 3 chars up to the full ID) as soon as its
+monitor comes online. Prefixes shorter than 3 chars (`cc-U`, `cc-US`) are not
+published — they'd carry every station's traffic and hit ntfy rate limits. The
+network codes (`USC`, `CAC`, `USL`, `USV`, …) are all 3 chars, so the floor
+covers each of them.
 
 The host record carries `groups` + `group_slugs` + `station_ids`, so host-level
 (OOM/memory) alerts fan out to the same group and prefix topics.

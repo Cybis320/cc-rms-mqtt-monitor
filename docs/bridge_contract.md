@@ -39,23 +39,28 @@ down → all its stations are stale. Use the host's last `health` record (its
 
 ## 3. Fan-out axes (the important part)
 
-For **each station alert**, publish the notification to ALL of these ntfy topics
+For **each station alert**, publish the notification to these ntfy topics
 (and match them in Telegram):
 
 - `cc-<group_slug>`                     — the operator's group
-- **`cc-<P>` for every leading prefix P of `station_id`** — `cc-U`, `cc-US`,
-  `cc-USC`, `cc-USC0`, … `cc-<full station_id>`
+- **`cc-<P>` for every leading prefix P of `station_id` with `len(P) >= 3`** —
+  `cc-USC`, `cc-USC0`, … up to `cc-<full station_id>`
+
+Prefixes shorter than 3 chars (`cc-U`, `cc-US`) are **deliberately skipped**:
+they'd each receive *every* station's alerts and hit ntfy rate limits.
 
 The prefix expansion is what lets a coordinator **subscribe to `cc-USC`
-(or `cc-CAC`, `cc-UV`, `cc-USL`) once** and automatically receive every current
-*and future* station whose ID starts with that prefix — no action when a new
-station deploys, because its alerts are published to all its prefixes as soon as
-its monitor comes online. **This auto-coverage requires the full prefix
-expansion — do not shorten it to just the full ID.**
+(or `cc-CAC`, `cc-USL`) once** and automatically receive every current *and
+future* station whose ID starts with that prefix — no action when a new station
+deploys. Keep the expansion from 3 chars up to the full ID (don't collapse it to
+only the full ID, or `cc-USC`-style network subscriptions stop working).
+
+> The network codes (`USC`, `CAC`, `USL`, `USV`, …) are all 3 chars, so the
+> 3-char floor covers every one of them.
 
 For **each host alert** (and the offline Last-Will), fan out to:
 - `cc-<group_slug>` for each entry in `group_slugs`
-- `cc-<P>` for every prefix P of each entry in `station_ids`
+- `cc-<P>` for every prefix P (`len >= 3`) of each entry in `station_ids`
 
 Station IDs are alphanumeric and `group_slug` is pre-slugified, so every `cc-<…>`
 is a valid ntfy topic / Telegram tag (no spaces).

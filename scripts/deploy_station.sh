@@ -211,8 +211,8 @@ for sl in slugs:
     print("    your group         ->  cc-%s" % sl)
 for sid in sids:
     print("    one camera         ->  cc-%s" % sid)
-print("    a whole network    ->  cc-USC, cc-CAC, cc-UV, cc-USL, ...")
-print("                           ANY leading prefix of a station ID is a topic.")
+print("    a whole network    ->  cc-USC, cc-CAC, cc-USL, cc-USV, ...")
+print("                           any leading prefix of a station ID, 3+ chars.")
 print("                           Subscribe to a network prefix ONCE and every current")
 print("                           AND future station with that prefix is covered")
 print("                           automatically -- no ntfy change when new stations deploy.")
