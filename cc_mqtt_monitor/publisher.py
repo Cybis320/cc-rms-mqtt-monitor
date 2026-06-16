@@ -1,20 +1,15 @@
-"""MQTT publishing: plain-JSON state + Home Assistant discovery + LWT.
+"""MQTT publishing: retained plain-JSON state + host Last-Will.
 
-Topic layout (with default prefixes):
+Topic layout (with default prefix):
 
-    contrailcast/rms/<host>/status            retained, "online"/"offline" (LWT)
-    contrailcast/rms/<station>/health         retained, JSON state blob
-    homeassistant/<component>/<station>/<key>/config   retained discovery
-
-The host status topic doubles as the HA availability source, so every entity
-flips to "unavailable" if this agent crashes or the host goes offline.
+    stations/<host>/status      retained, "online"/"offline" (LWT)
+    stations/<host>/health      retained, JSON host (OS) state blob
+    stations/<station>/health   retained, JSON per-station state blob
 """
 
 import json
 
 import paho.mqtt.client as mqtt
-
-from . import hadiscovery
 
 
 def _make_client(client_id):
@@ -41,7 +36,6 @@ class Publisher:
             self.client.tls_set()
         # Last Will: if we drop without a clean disconnect, broker marks us down.
         self.client.will_set(self.host_status_topic, "offline", qos=1, retain=True)
-        self._discovery_sent = set()
         self._pending = []
 
     def connect(self):
@@ -79,37 +73,11 @@ class Publisher:
                 pass
         self._pending = []
 
-    def _send_discovery(self, station_id):
-        if not self.config.ha_discovery_enabled or station_id in self._discovery_sent:
-            return
-        for topic, payload in hadiscovery.discovery_messages(
-            station_id,
-            self._state_topic(station_id),
-            self.host_status_topic,
-            self.config.ha_discovery_prefix,
-        ):
-            self._publish(topic, json.dumps(payload))
-        self._discovery_sent.add(station_id)
-
-    def _send_host_discovery(self):
-        if not self.config.ha_discovery_enabled or "__host__" in self._discovery_sent:
-            return
-        for topic, payload in hadiscovery.host_discovery_messages(
-            self.config.host_name,
-            self._host_state_topic(),
-            self.host_status_topic,
-            self.config.ha_discovery_prefix,
-        ):
-            self._publish(topic, json.dumps(payload))
-        self._discovery_sent.add("__host__")
-
     def publish_state(self, state):
         station_id = state["station_id"]
-        self._send_discovery(station_id)
         self._publish(self._state_topic(station_id), json.dumps(state, default=str))
 
     def publish_host_state(self, state):
-        self._send_host_discovery()
         self._publish(self._host_state_topic(), json.dumps(state, default=str))
 
     def disconnect(self, mark_offline=True):

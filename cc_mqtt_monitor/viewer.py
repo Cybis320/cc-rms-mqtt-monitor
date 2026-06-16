@@ -1,7 +1,7 @@
 """A minimal subscriber that prints a live multi-station status table.
 
 This is a reference consumer of the plain-JSON state topics -- handy for a quick
-look without standing up Home Assistant or a web dashboard.
+look without standing up a web dashboard.
 """
 
 import json

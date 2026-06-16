@@ -2,11 +2,9 @@
 
 A standalone, host-level agent that monitors the health of every
 [RMS](https://github.com/CroatianMeteorNetwork/RMS) meteor-camera station on a
-machine and publishes it to an MQTT broker. State is published in two
-complementary forms from the same data:
-
-- **Plain JSON** — one retained blob per station for custom dashboards.
-- **Home Assistant MQTT Discovery** — auto-created entities, no UI code.
+machine and publishes it to an MQTT broker as one retained plain-JSON blob per
+station (plus a host/OS blob). A broker-side ntfy + Telegram bridge consumes
+those topics for alerting, and they're equally usable by any custom dashboard.
 
 It supports both deployment schemes automatically:
 
@@ -54,23 +52,19 @@ host memory pressure.
 ## Health topics
 
 ```
-stations/<host>/status                         retained "online"/"offline" (Last Will)
-stations/<host>/health                          retained JSON host (OS) state blob
-stations/<station>/health                       retained JSON per-station state blob
-stations/homeassistant/<component>/<id>/<key>/config   retained HA discovery
+stations/<host>/status      retained "online"/"offline" (Last Will)
+stations/<host>/health       retained JSON host (OS) state blob
+stations/<station>/health    retained JSON per-station state blob
 ```
 
 > **Broker namespace:** the contrailcast broker is an open, unauthenticated,
-> plaintext broker whose ACL only permits the `stations/#` topic tree. Every
-> topic — including the host status/Last-Will and the HA discovery configs —
-> therefore lives under `stations/`. Alerting is handled by a broker-side
-> consumer of the `stations/<id>/health` topics (ntfy + Telegram). Home
-> Assistant discovery is **off by default**; enable `ha_discovery_enabled: true`
-> (and point HA's MQTT discovery prefix at `stations/homeassistant`) only if you
-> use Home Assistant.
+> plaintext broker whose ACL only permits the `stations/#` topic tree, so every
+> topic (including the host status/Last-Will) lives under `stations/`. Alerting
+> is handled by a broker-side consumer of the `stations/<id>/health` topics
+> (ntfy + Telegram).
 
 The host status topic is the MQTT **Last Will** target, so a crashed agent or
-offline host is detected without polling, and HA entities flip to "unavailable".
+offline host is detected without polling.
 
 Example `health` payload:
 

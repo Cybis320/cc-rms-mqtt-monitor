@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cc-rms-mqtt-monitor"
 version = "0.1.0"
-description = "Publish RMS meteor-station health to MQTT (plain JSON + Home Assistant discovery)"
+description = "Publish RMS meteor-station health to MQTT (retained plain JSON)"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.7"
 authors = [{name = "ContrailCast"}]
-keywords = ["rms", "meteor", "mqtt", "monitoring", "homeassistant"]
+keywords = ["rms", "meteor", "mqtt", "monitoring", "ntfy"]
 dependencies = [
     "paho-mqtt>=1.6",
     "pyyaml>=5.1",

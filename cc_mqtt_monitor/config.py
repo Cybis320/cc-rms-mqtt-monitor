@@ -78,14 +78,8 @@ class Config:
 
     # Topic layout. Plain state is published to "<topic_prefix>/<station>/health".
     # The contrailcast broker ACL only permits the "stations/#" namespace, so
-    # everything (state, host status/LWT, and HA discovery) must live under it.
+    # everything (state + host status/LWT) must live under it.
     topic_prefix: str = "stations"
-
-    # Home Assistant MQTT Discovery. Off by default (the contrailcast network
-    # uses ntfy + Telegram for alerting, not HA). Enable + point HA's MQTT
-    # integration discovery prefix at this value if you do use Home Assistant.
-    ha_discovery_enabled: bool = False
-    ha_discovery_prefix: str = "stations/homeassistant"
 
     interval_seconds: int = 60
     # Number of trailing log lines scanned per station per cycle.
