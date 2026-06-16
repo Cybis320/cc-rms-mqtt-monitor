@@ -15,23 +15,37 @@ def _iso(ts):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
 
 
+def _grouping(config):
+    """Subscription labels attached to every record for the alert bridge."""
+    return {"group": config.group, "tags": list(config.tags or [])}
+
+
 def gather(config):
     """Discover stations and build a state dict for each (no MQTT involved)."""
     stations = discover_stations(config.stations_dir, config.rms_dir)
     now = time.time()
+    grouping = _grouping(config)
     states = []
     for station in stations:
         metrics = collect_station(
             station, config.log_tail_lines,
             config.thresholds.night_horizon_deg, now)
-        states.append(build_state(metrics, config.thresholds, config.host_name, _iso(now)))
+        state = build_state(metrics, config.thresholds, config.host_name, _iso(now))
+        state.update(grouping)
+        states.append(state)
     return states
 
 
 def gather_host(config):
     """Build the host-wide (OS) state dict."""
+    stations = discover_stations(config.stations_dir, config.rms_dir)
     metrics = collect_host()
-    return build_host_state(metrics, config.thresholds, config.host_name, _iso(time.time()))
+    state = build_host_state(metrics, config.thresholds, config.host_name, _iso(time.time()))
+    state.update(_grouping(config))
+    # The stations on this host let the bridge fan a host-level (OOM) alert out
+    # to every network these cameras belong to.
+    state["station_ids"] = [s.station_id for s in stations]
+    return state
 
 
 def run_once(config, publisher=None):

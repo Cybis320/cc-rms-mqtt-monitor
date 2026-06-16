@@ -45,8 +45,11 @@ def main(argv=None):
 
     # --status: pure local diagnostics, no broker connection needed.
     if args.status:
-        states = monitor.gather(config)
-        print(json.dumps(states, indent=2, default=str))
+        output = {
+            "host": monitor.gather_host(config),
+            "stations": monitor.gather(config),
+        }
+        print(json.dumps(output, indent=2, default=str))
         return 0
 
     if args.viewer:

@@ -55,9 +55,37 @@ info "Installing package + dependencies"
 "$PY" -m pip install --quiet -e "$DEST"
 
 # --- 3. Config --------------------------------------------------------------
+# Sanitize to characters safe in a topic/ntfy name and in our sed substitution.
+sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9_.-'; }
+
 if [ ! -f "$DEST/config.yaml" ]; then
     cp "$DEST/config.example.yaml" "$DEST/config.yaml"
-    info "Created config.yaml (defaults: mqtt.contrailcast.com:8883 TLS)"
+
+    # Ask for the subscription group + tags. Read from the controlling terminal
+    # so this works even under `curl ... | bash` (where stdin is the script).
+    # Pre-seed non-interactively with CC_GROUP / CC_TAGS.
+    GROUP="$(sanitize "${CC_GROUP:-}")"
+    TAGS_RAW="${CC_TAGS:-}"
+    if [ -z "$GROUP" ] && [ -r /dev/tty ]; then
+        read -rp "Subscription group for this host (your operator handle, e.g. 'luc'): " GROUP < /dev/tty || true
+        GROUP="$(sanitize "$GROUP")"
+    fi
+    if [ -z "$TAGS_RAW" ] && [ -r /dev/tty ]; then
+        read -rp "Extra tags, comma-separated (optional, e.g. 'USC,contrail'): " TAGS_RAW < /dev/tty || true
+    fi
+
+    # Build a YAML flow list from the comma-separated tags, sanitizing each.
+    TAGS_YAML=""
+    IFS=',' read -ra _tags <<< "$TAGS_RAW"
+    for t in "${_tags[@]}"; do
+        t="$(sanitize "$t")"
+        [ -n "$t" ] && TAGS_YAML="${TAGS_YAML:+$TAGS_YAML, }$t"
+    done
+
+    [ -n "$GROUP" ]     && sed -i "s|^group:.*|group: $GROUP|"        "$DEST/config.yaml"
+    [ -n "$TAGS_YAML" ] && sed -i "s|^tags:.*|tags: [$TAGS_YAML]|"    "$DEST/config.yaml"
+
+    info "Created config.yaml (group='${GROUP:-none}', tags=[${TAGS_YAML}])"
 else
     info "Keeping existing config.yaml"
 fi
