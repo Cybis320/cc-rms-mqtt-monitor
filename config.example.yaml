@@ -33,6 +33,13 @@ interval_seconds: 60
 log_tail_lines: 4000
 host_name: null           # defaults to the system hostname
 
+# Maintenance detection: records get maintenance:true (so the bridge mutes alerts
+# for expected disruption) when the host just rebooted, RMS is updating, or a
+# sentinel file is present.
+boot_grace_s: 600                  # treat the first 10 min after boot as "booting"
+maintenance_file: null             # optional; e.g. GRMSUpdater can `touch` it during a run
+maintenance_file_max_age_s: 7200   # ignore a stale sentinel older than this
+
 # Subscription-group OVERRIDE (the installer asks and sets this). When set it
 # applies to every station on this host; when null, each station uses its own
 # RMS camera_group_name. Subscribers use cc-<slug-of-group>.

@@ -25,6 +25,7 @@ Distinguish the two `health` shapes by payload:
 - `problems` — list[str], human-readable; **this is the notification body**
 - `group` — human label (e.g. `Elginfield Contrail Cameras`)
 - `group_slug` — slugified handle (e.g. `Elginfield-Contrail-Cameras`); valid ntfy topic
+- `maintenance` (bool) + `maintenance_reason` — expected-disruption flag (see §4)
 - `host`, `timestamp` (ISO-8601 UTC)
 
 **Host** (`stations/<host>/health`):
@@ -65,32 +66,36 @@ For **each host alert** (and the offline Last-Will), fan out to:
 Station IDs are alphanumeric and `group_slug` is pre-slugified, so every `cc-<…>`
 is a valid ntfy topic / Telegram tag (no spaces).
 
-## 4. Notify on change, debounced (don't alert on transients)
+## 4. Don't alert on EXPECTED disruption (use the monitor's `maintenance` flag)
 
-The monitor re-publishes retained state **every 60 s** and reports the true
-*current* state — including brief, expected blips. Keep last-seen `status`/
-`problems` per `station_id`/host, and:
+The monitor reports the true *current* state every 60 s, and it also tells you
+**when disruption is expected** — it has the local knowledge the bridge doesn't.
+Every record carries:
 
-1. **Only notify on change** — entering `degraded`/`error`, gaining new
-   `problems`, or recovering to `ok`. Never notify every cycle.
-2. **Debounce: require the condition to PERSIST before alerting** — a
-   "for N minutes" rule (suggest **5–10 min**, configurable). Only fire a
-   problem notification once a station/host has stayed non-`ok` (or `offline`)
-   continuously for N minutes; if it recovers within N minutes, **send nothing**.
-3. **Recovery only if you alerted** — send a recovery (`→ ok` / back `online`)
-   only when a problem notification was actually sent for that episode.
+- `maintenance` — `true` when this host is in a known-disruption state
+- `maintenance_reason` — `"booting"` (host just rebooted), `"rms-updating"`
+  (GRMSUpdater running), or `"flagged"` (operator sentinel)
 
-This debounce is essential: the nightly `GRMSUpdater` cron (~19:00) restarts the
-RMS capture processes (brief `capture_down` on every station) and, on kernel
-updates, reboots the host (monitor down → Last-Will `offline` → `online`). Those
-resolve within a couple of minutes, so a 5–10 min persist window suppresses the
-whole burst while still catching real outages. The same rule absorbs RMS's own
-watchdog restarts and momentary log/detection blips.
+Rules:
 
-(Optional, additive: honor a maintenance flag — e.g. if `GRMSUpdater` touches a
-sentinel topic/file at start/end of an update — to mute a host entirely during
-planned maintenance. The persist-window debounce already handles the common
-case without it.)
+1. **Suppress while `maintenance` is true.** A `degraded`/`error` record with
+   `maintenance: true` is the nightly `GRMSUpdater` cron restarting capture or
+   the box rebooting — **do not notify**. When `maintenance` is false, a real
+   failure → notify (no artificial delay).
+2. **Offline during maintenance is expected.** If a host's last record before an
+   `offline` Last-Will had `maintenance: true` (e.g. `rms-updating`), or it comes
+   back reporting `maintenance: "booting"`, treat the `offline`/`online` flap as
+   an expected reboot and stay quiet.
+3. **Only notify on change**, and **recovery only if you alerted** (don't send a
+   `→ ok` for an episode you suppressed).
+4. **Short backstop (optional):** a small "must persist ~2–3 min" window catches
+   the rare transient the monitor didn't classify, without delaying real alerts
+   much. The `maintenance` flag is the primary mechanism; the window is just a
+   safety net.
+
+This keeps real failures instant while the ~19:00 update/reboot churn (and RMS's
+own watchdog restarts) is silenced by the station that actually knows it's
+expected.
 
 ## 5. Notification mapping
 

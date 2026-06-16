@@ -88,6 +88,13 @@ class Config:
     interval_seconds: int = 60
     # Number of trailing log lines scanned per station per cycle.
     log_tail_lines: int = 4000
+
+    # Maintenance detection: mark records "expected disruption" so the bridge
+    # suppresses alerts for them. Host just rebooted (uptime below this), RMS
+    # updater running, or an explicit sentinel file present.
+    boot_grace_s: int = 600
+    maintenance_file: str = None          # optional sentinel touched by GRMSUpdater
+    maintenance_file_max_age_s: int = 7200
     # Identifier for this host (defaults to the system hostname).
     host_name: str = None
 

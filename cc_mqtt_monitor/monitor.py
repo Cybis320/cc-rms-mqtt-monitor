@@ -8,6 +8,7 @@ from .discovery import discover_stations
 from .collect import collect_station
 from .oslevel import collect_host
 from .health import build_state, build_host_state
+from . import maintenance
 
 log = logging.getLogger("cc_mqtt_monitor")
 
@@ -35,6 +36,7 @@ def gather(config):
     """Discover stations and build a state dict for each (no MQTT involved)."""
     stations = discover_stations(config.stations_dir, config.rms_dir)
     disabled = set(config.disabled_checks or [])
+    maint, maint_reason = maintenance.detect(config)
     now = time.time()
     states = []
     for station in stations:
@@ -43,6 +45,8 @@ def gather(config):
         group = _station_group(station, config)
         state["group"] = group               # human-readable label
         state["group_slug"] = _slug(group)   # canonical subscription handle
+        state["maintenance"] = maint         # expected-disruption flag (bridge mutes)
+        state["maintenance_reason"] = maint_reason
         states.append(state)
     return states
 
@@ -60,6 +64,9 @@ def gather_host(config):
     state["groups"] = groups
     state["group_slugs"] = [_slug(g) for g in groups]
     state["station_ids"] = [s.station_id for s in stations]
+    maint, maint_reason = maintenance.detect(config)
+    state["maintenance"] = maint
+    state["maintenance_reason"] = maint_reason
     return state
 
 
