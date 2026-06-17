@@ -1,15 +1,23 @@
 """Detect when disruption is EXPECTED, using local host knowledge.
 
 The monitor (unlike the bridge) can see why capture is briefly down: the host
-just rebooted, RMS is mid-update, or an operator flagged maintenance. It stamps
-`maintenance` + `maintenance_reason` on every published record so the bridge can
-suppress notifications for *expected* churn while still alerting instantly on
-genuine, unexpected failures (no blind time-delay needed).
+just rebooted, or RMS is mid-update. It stamps `maintenance` + `maintenance_
+reason` on every published record so the bridge can suppress notifications for
+*expected* churn while still alerting instantly on genuine failures.
 
-Reasons, in priority order:
-  flagged       -- an explicit maintenance sentinel file is present and fresh
+Reasons:
   booting       -- host uptime is below boot_grace_s (capture still starting)
-  rms-updating  -- a GRMSUpdater / RMS_Update process is running
+  rms-updating  -- a GRMSUpdater / RMS_Update process is actually running
+
+Self-healing (so a stuck marker can't mute a host forever):
+  * A lock/flag file is NEVER trusted on its own -- "updating" requires a live
+    updater process. GRMSUpdater's flock file (e.g. /tmp/rms_grms_updater.lock)
+    lingers after the process exits, and a kernel-update run reboots mid-way, so
+    a left-behind file must not imply maintenance.
+  * The updater process is time-bounded -- a hung updater older than the update
+    window doesn't count.
+  * A stale maintenance_file is deleted (on boot, when no updater is alive, or
+    when older than the window).
 """
 
 import os
@@ -17,6 +25,11 @@ import time
 
 # Process command-line markers that mean "RMS is being updated right now".
 _UPDATER_MARKERS = ("GRMSUpdater", "RMS_Update")
+
+try:
+    _CLK_TCK = os.sysconf("SC_CLK_TCK")
+except (AttributeError, ValueError, OSError):
+    _CLK_TCK = 100
 
 
 def _uptime_s():
@@ -27,7 +40,24 @@ def _uptime_s():
         return None
 
 
-def _updater_running():
+def _proc_age_s(pid):
+    """Seconds since process <pid> started, or None if it can't be determined."""
+    try:
+        with open("/proc/%s/stat" % pid) as fh:
+            line = fh.read()
+        # Fields after the "(comm)" are space-separated; starttime is field 22.
+        rest = line[line.rfind(")") + 2:].split()
+        starttime_ticks = float(rest[19])
+        uptime = _uptime_s()
+        if uptime is None:
+            return None
+        return uptime - starttime_ticks / _CLK_TCK
+    except (IOError, OSError, ValueError, IndexError):
+        return None
+
+
+def _updater_running(max_age_s):
+    """True if a GRMSUpdater/RMS_Update process started within max_age_s is alive."""
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
@@ -37,29 +67,35 @@ def _updater_running():
         except (IOError, OSError):
             continue
         if cmd and any(m in cmd for m in _UPDATER_MARKERS):
-            return True
+            age = _proc_age_s(entry)
+            if age is None or age <= max_age_s:
+                return True   # an updater that started within the sane window
     return False
 
 
-def _flag_fresh(path, max_age_s):
-    try:
-        path = os.path.expanduser(path)
-        return os.path.isfile(path) and (time.time() - os.path.getmtime(path)) < max_age_s
-    except (IOError, OSError):
-        return False
-
-
 def detect(config):
-    """Return (maintenance: bool, reason: str|None)."""
-    if config.maintenance_file and _flag_fresh(
-            config.maintenance_file, config.maintenance_file_max_age_s):
-        return True, "flagged"
-
+    """Return (maintenance: bool, reason: str|None). Self-healing."""
+    window = config.maintenance_file_max_age_s     # sane update window (s)
     uptime = _uptime_s()
-    if uptime is not None and uptime < config.boot_grace_s:
+    booting = uptime is not None and uptime < config.boot_grace_s
+    updating = _updater_running(window)
+
+    # Self-heal a lingering lock/flag file: it is never a maintenance signal on
+    # its own, so just delete it when clearly stale -- on boot (an update that
+    # rebooted is done), when no updater is alive, or when older than the window.
+    mf = config.maintenance_file
+    if mf:
+        mf = os.path.expanduser(mf)
+        try:
+            if os.path.isfile(mf):
+                age = time.time() - os.path.getmtime(mf)
+                if booting or (not updating) or age > window:
+                    os.remove(mf)
+        except OSError:
+            pass
+
+    if booting:
         return True, "booting"
-
-    if _updater_running():
+    if updating:
         return True, "rms-updating"
-
     return False, None

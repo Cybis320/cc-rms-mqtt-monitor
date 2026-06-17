@@ -77,8 +77,10 @@ The monitor reports the true *current* state every 60 s, and it also tells you
 Every record carries:
 
 - `maintenance` — `true` when this host is in a known-disruption state
-- `maintenance_reason` — `"booting"` (host just rebooted), `"rms-updating"`
-  (GRMSUpdater running), or `"flagged"` (operator sentinel)
+- `maintenance_reason` — `"booting"` (host just rebooted) or `"rms-updating"`
+  (a GRMSUpdater process is actually running). Self-healing on the station side:
+  a lingering lock/flag file alone never sets this, and it clears on boot / when
+  no updater is alive / after the update window — so it can't get stuck `true`.
 
 Rules:
 

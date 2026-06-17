@@ -90,11 +90,14 @@ class Config:
     log_tail_lines: int = 4000
 
     # Maintenance detection: mark records "expected disruption" so the bridge
-    # suppresses alerts for them. Host just rebooted (uptime below this), RMS
-    # updater running, or an explicit sentinel file present.
+    # suppresses alerts for them. Host just rebooted (uptime below this), or an
+    # RMS updater process is actually running. Self-healing: a lingering lock/
+    # flag file never implies maintenance on its own and is cleaned up.
     boot_grace_s: int = 600
-    maintenance_file: str = None          # optional sentinel touched by GRMSUpdater
-    maintenance_file_max_age_s: int = 7200
+    # Sane RMS-update window: an updater process or lock older than this is
+    # treated as stale (a real update completes well within 15 min).
+    maintenance_file_max_age_s: int = 900
+    maintenance_file: str = None          # optional GRMSUpdater lock to clean up
     # Identifier for this host (defaults to the system hostname).
     host_name: str = None
 
