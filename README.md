@@ -113,6 +113,8 @@ Example `health` payload:
                "Fatal error in log (3x): ImportError: ... cannot open shared object file"],
   "group": "Elginfield Contrail Cameras",
   "group_slug": "Elginfield-Contrail-Cameras",
+  "lat": 43.19,
+  "lon": -81.32,
   "capture_alive": true,
   "newest_fits_age_s": 8.2,
   "fits_count": 210,

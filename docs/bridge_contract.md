@@ -26,6 +26,8 @@ Distinguish the two `health` shapes by payload:
 - `group` — human label (e.g. `Elginfield Contrail Cameras`)
 - `group_slug` — slugified handle (e.g. `Elginfield-Contrail-Cameras`); valid ntfy topic
 - `maintenance` (bool) + `maintenance_reason` — expected-disruption flag (see §4)
+- `lat`, `lon` — approximate station coordinates (decimal degrees, rounded to
+  ~1 km); present only when the RMS `.config` has coordinates. For dashboard maps.
 - `host`, `timestamp` (ISO-8601 UTC)
 
 **Host** (`stations/<host>/health`):

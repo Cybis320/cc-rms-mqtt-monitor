@@ -48,6 +48,11 @@ def gather(config, maint=None):
         state["group_slug"] = _slug(group)   # canonical subscription handle
         state["maintenance"] = maint         # expected-disruption flag (bridge mutes)
         state["maintenance_reason"] = maint_reason
+        # Approximate coordinates for the dashboard map: obfuscated to ~1 km
+        # (2 decimals). Omitted entirely when the .config has no coords.
+        if station.has_location:
+            state["lat"] = round(station.latitude, 2)
+            state["lon"] = round(station.longitude, 2)
         states.append(state)
     return states
 
