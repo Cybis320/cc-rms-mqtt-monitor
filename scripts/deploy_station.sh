@@ -218,4 +218,16 @@ print("                           AND future station with that prefix is covered
 print("                           automatically -- no ntfy change when new stations deploy.")
 ' || true
 
+# --- 6. publish-consent note -----------------------------------------------
+echo
+info "Publish consent: this monitor honors RMS 'weblog_enable'. A camera with"
+info "  weblog_enable: false is NOT transmitted to MQTT (and any prior data is"
+info "  cleared); a host with no opted-in cameras transmits nothing at all."
+OPTED_OUT="$(grep -lEi '^[[:space:]]*weblog_enable:[[:space:]]*(false|0|no)' \
+                 "${CC_STATIONS_DIR:-$HOME/source/Stations}"/*/.config \
+                 "${CC_RMS_DIR:-$HOME/source/RMS}/.config" 2>/dev/null | wc -l)"
+if [ "${OPTED_OUT:-0}" -gt 0 ]; then
+    warn "  ${OPTED_OUT} station config(s) here have weblog_enable=false -> not published."
+fi
+
 info "Done."

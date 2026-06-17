@@ -170,6 +170,11 @@ world-readable by design, so TLS is opt-in (see `deploy/README.md`); enable it
 only alongside authentication. Override the repo with
 `CC_REPO_URL=… bash deploy_station.sh` if you fork it.
 
+> **Opting out:** the monitor honors your RMS `weblog_enable` setting. Any camera
+> with `weblog_enable: false` is **not transmitted** to MQTT at all (and a host
+> with no opted-in cameras transmits nothing) — same consent flag that controls
+> the GMN weblog.
+
 For a manual/dev install:
 
 ```bash
@@ -245,10 +250,15 @@ Run as a service: see `systemd/cc-rms-monitor.service`.
 
 ## Design notes
 
-- **Honors publish consent.** A station whose RMS `.config` has
-  `weblog_enable: false` ("show this camera on the GMN weblog") is never
-  published to MQTT — not its health topic, nor its ID/group in the host record.
-  If no station on a host consents, the host record isn't published either.
+- **Honors publish consent (`weblog_enable`).** A station whose RMS `.config`
+  has `weblog_enable: false` ("show this camera on the GMN weblog") is **never
+  published** — not its health, coordinates, pointing, nor its ID/group in the
+  host record — and if it had been published before, its retained record is
+  **cleared** from the broker. If **no** station on a host consents, the monitor
+  **transmits nothing at all**: it doesn't connect/announce, and on opting the
+  last station out it wipes the host's status + records and disconnects without
+  even an offline marker. In short: set `weblog_enable: false` and that camera
+  (or the whole host) is silent on MQTT.
 - **Read-only / non-invasive.** Reads `/proc`, files, and logs; it never touches
   RMS processes or data, so it cannot perturb capture.
 - **No RMS import.** It parses the `.config` and on-disk artifacts directly, so it

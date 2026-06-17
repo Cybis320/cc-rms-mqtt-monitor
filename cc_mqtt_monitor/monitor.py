@@ -134,8 +134,28 @@ def run_once(config, publisher=None):
     return host_state, states
 
 
+def _connect_with_retry(config, publisher):
+    """Connect with backoff so a transient network/broker issue at boot just
+    retries instead of crashing. paho's loop auto-reconnects after this."""
+    backoff = 5
+    while True:
+        try:
+            publisher.connect()
+            return
+        except Exception as exc:
+            log.warning("Broker connect to %s:%d failed (%s); retrying in %ds",
+                        config.broker.host, config.broker.port, exc, backoff)
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 60)
+
+
 def run_loop(config, publisher):
-    """Run forever, publishing every config.interval_seconds."""
+    """Run forever, publishing every config.interval_seconds.
+
+    Connects ONLY while at least one station consents to being published
+    (weblog_enable). A fully opted-out host transmits nothing; opting a station
+    out at runtime wipes its retained record, and opting the whole host out wipes
+    everything and disconnects without an 'offline' marker."""
     from .oslevel import protect_from_oom
     adj = protect_from_oom()
     if adj is not None:
@@ -143,36 +163,47 @@ def run_loop(config, publisher):
     else:
         log.info("Could not lower oom_score_adj; rely on systemd OOMScoreAdjust")
 
-    # Retry the initial broker connection with backoff, so a transient network/
-    # broker issue at boot (DNS not ready, broker restarting) just retries
-    # instead of crashing the service. paho's loop auto-reconnects after this.
-    backoff = 5
-    while True:
-        try:
-            publisher.connect()
-            break
-        except Exception as exc:
-            log.warning("Broker connect to %s:%d failed (%s); retrying in %ds",
-                        config.broker.host, config.broker.port, exc, backoff)
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 60)
-    log.info("Connected to %s:%d; monitoring every %ds",
-             config.broker.host, config.broker.port, config.interval_seconds)
+    connected = False
+    cleared = set()   # opted-out station ids whose retained record we've wiped
     try:
         while True:
             start = time.time()
-            try:
-                run_once(config, publisher)
-            except Exception:  # never let one bad cycle kill the agent
-                log.exception("Error during monitor cycle")
-            # Sleep until the next cycle, but wake early and re-publish if the
-            # maintenance state flips (e.g. GRMSUpdater just started) -- so the
-            # bridge learns it's an expected disruption before a fast reboot.
+            stations = discover_stations(config.stations_dir, config.rms_dir)
+            consenting = [s for s in stations if s.weblog_enable]
+            opted_out = [s.station_id for s in stations if not s.weblog_enable]
+
+            if consenting:
+                if not connected:
+                    _connect_with_retry(config, publisher)
+                    connected = True
+                    log.info("Connected to %s:%d; monitoring every %ds",
+                             config.broker.host, config.broker.port,
+                             config.interval_seconds)
+                try:
+                    run_once(config, publisher)
+                    for sid in opted_out:        # wipe any prior data, once each
+                        if sid not in cleared:
+                            publisher.clear_station(sid)
+                            cleared.add(sid)
+                    cleared &= set(opted_out)     # re-arm if a station re-consents
+                except Exception:  # never let one bad cycle kill the agent
+                    log.exception("Error during monitor cycle")
+            elif connected:
+                log.info("No station has weblog_enable=true; clearing retained "
+                         "data and going silent")
+                publisher.go_silent([s.station_id for s in stations])
+                connected = False
+                cleared = set()
+            else:
+                log.info("No station has weblog_enable=true; nothing published")
+
+            # Sleep until the next cycle, but wake early if maintenance flips.
             _sleep_until_next(config, start)
     except KeyboardInterrupt:
         log.info("Interrupted; shutting down")
     finally:
-        publisher.disconnect()
+        if connected:
+            publisher.disconnect()
 
 
 # How often, during the inter-cycle sleep, to re-check the maintenance state.

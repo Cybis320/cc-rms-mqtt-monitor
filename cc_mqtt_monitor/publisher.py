@@ -104,6 +104,24 @@ class Publisher:
                       json.dumps(state, default=str), retain=False)
         self.flush()
 
+    def clear_station(self, station_id):
+        """Remove a station's retained record (empty retained payload), e.g. when
+        it is newly opted out of publishing so its old data doesn't linger."""
+        self._publish(self._state_topic(station_id), "", retain=True)
+        self.flush()
+
+    def go_silent(self, station_ids):
+        """Wipe everything this host published (status, host record, the given
+        station records) and disconnect cleanly WITHOUT an 'offline' marker -- so
+        a fully opted-out host leaves nothing at all on the broker."""
+        self._publish(self.host_status_topic, "", retain=True)
+        self._publish(self._host_state_topic(), "", retain=True)
+        for sid in station_ids:
+            self._publish(self._state_topic(sid), "", retain=True)
+        self.flush()
+        self.client.loop_stop()
+        self.client.disconnect()   # clean disconnect -> Last-Will does not fire
+
     def disconnect(self):
         self.flush()
         # Only the announcing (long-running) publisher owns the host status.
