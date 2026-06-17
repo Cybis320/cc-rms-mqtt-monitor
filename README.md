@@ -245,6 +245,10 @@ Run as a service: see `systemd/cc-rms-monitor.service`.
 
 ## Design notes
 
+- **Honors publish consent.** A station whose RMS `.config` has
+  `weblog_enable: false` ("show this camera on the GMN weblog") is never
+  published to MQTT — not its health topic, nor its ID/group in the host record.
+  If no station on a host consents, the host record isn't published either.
 - **Read-only / non-invasive.** Reads `/proc`, files, and logs; it never touches
   RMS processes or data, so it cannot perturb capture.
 - **No RMS import.** It parses the `.config` and on-disk artifacts directly, so it

@@ -44,6 +44,9 @@ class Station:
     switch_camera_modes: bool = False
     save_frames: bool = True
     timelapse_generate_from_frames: bool = True
+    # Operator consent to show this camera publicly (RMS "show on GMN weblog").
+    # When false, the monitor must not publish this station to MQTT.
+    weblog_enable: bool = True
     latitude: float = 0.0
     longitude: float = 0.0
     elevation: float = 0.0
@@ -140,6 +143,7 @@ def _station_from_config(config_path):
         save_frames=_as_bool(cfg.get("save_frames"), default=True),
         timelapse_generate_from_frames=_as_bool(
             cfg.get("timelapse_generate_from_frames"), default=True),
+        weblog_enable=_as_bool(cfg.get("weblog_enable"), default=True),
         latitude=latitude,
         longitude=longitude,
         elevation=elevation,

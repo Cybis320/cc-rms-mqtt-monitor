@@ -32,10 +32,18 @@ def _station_group(station, config):
     return config.group or station.camera_group_name
 
 
+def _consenting_stations(config):
+    """Stations the operator allows to be published (RMS weblog_enable). A
+    station with weblog_enable=false is never published to MQTT, and is also
+    excluded from the host record's station_ids/groups, so it doesn't leak."""
+    return [s for s in discover_stations(config.stations_dir, config.rms_dir)
+            if s.weblog_enable]
+
+
 def gather(config, maint=None):
     """Discover stations and build a state dict for each (no MQTT involved).
     `maint` is the (bool, reason) maintenance tuple; computed if not passed."""
-    stations = discover_stations(config.stations_dir, config.rms_dir)
+    stations = _consenting_stations(config)
     disabled = set(config.disabled_checks or [])
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     now = time.time()
@@ -58,8 +66,11 @@ def gather(config, maint=None):
 
 
 def gather_host(config, maint=None):
-    """Build the host-wide (OS) state dict."""
-    stations = discover_stations(config.stations_dir, config.rms_dir)
+    """Build the host-wide (OS) state dict, or None if no station consents to
+    being published (so a fully opted-out host leaks nothing)."""
+    stations = _consenting_stations(config)
+    if not stations:
+        return None
     disabled = set(config.disabled_checks or [])
     metrics = collect_host()
     state = build_host_state(metrics, config.thresholds, config.host_name,
@@ -81,7 +92,7 @@ def make_test_state(config):
     host's actual group_slug and a station_id derived from a real station (so it
     reaches both cc-<group_slug> and the network's cc-<prefix> subscribers),
     without clobbering any real station's retained state."""
-    stations = discover_stations(config.stations_dir, config.rms_dir)
+    stations = _consenting_stations(config)
     now = time.time()
     if stations:
         base_id = stations[0].station_id
@@ -106,10 +117,11 @@ def run_once(config, publisher=None):
     """Collect host + every station once and (optionally) publish."""
     maint = maintenance.detect(config)            # one scan per cycle, shared
     host_state = gather_host(config, maint)
-    log.info("host %s: %s %s", config.host_name, host_state["status"],
-             ("- " + "; ".join(host_state["problems"])) if host_state["problems"] else "")
-    if publisher:
-        publisher.publish_host_state(host_state)
+    if host_state is not None:
+        log.info("host %s: %s %s", config.host_name, host_state["status"],
+                 ("- " + "; ".join(host_state["problems"])) if host_state["problems"] else "")
+        if publisher:
+            publisher.publish_host_state(host_state)
 
     states = gather(config, maint)
     for state in states:
