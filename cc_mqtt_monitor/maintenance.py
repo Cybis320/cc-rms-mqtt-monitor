@@ -23,8 +23,11 @@ Self-healing (so a stuck marker can't mute a host forever):
 import os
 import time
 
-# Process command-line markers that mean "RMS is being updated right now".
-_UPDATER_MARKERS = ("GRMSUpdater", "RMS_Update")
+# Updater script basenames. We match the *executable being run* (an argv element
+# whose basename is one of these), NOT a substring anywhere in the command line --
+# otherwise an unrelated process that merely mentions the name (a grep, an editor,
+# a commit message) would look like an update in progress.
+_UPDATER_SCRIPTS = ("GRMSUpdater.sh", "RMS_Update.sh")
 
 try:
     _CLK_TCK = os.sysconf("SC_CLK_TCK")
@@ -57,19 +60,23 @@ def _proc_age_s(pid):
 
 
 def _updater_running(max_age_s):
-    """True if a GRMSUpdater/RMS_Update process started within max_age_s is alive."""
+    """True if a GRMSUpdater/RMS_Update script started within max_age_s is alive."""
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
         try:
             with open("/proc/%s/cmdline" % entry, "rb") as fh:
-                cmd = fh.read().replace(b"\x00", b" ").decode("utf-8", "replace")
+                args = fh.read().split(b"\x00")
         except (IOError, OSError):
             continue
-        if cmd and any(m in cmd for m in _UPDATER_MARKERS):
-            age = _proc_age_s(entry)
-            if age is None or age <= max_age_s:
-                return True   # an updater that started within the sane window
+        for arg in args:
+            if not arg:
+                continue
+            if os.path.basename(arg.decode("utf-8", "replace")) in _UPDATER_SCRIPTS:
+                age = _proc_age_s(entry)
+                if age is None or age <= max_age_s:
+                    return True   # updater started within the sane window
+                break
     return False
 
 
