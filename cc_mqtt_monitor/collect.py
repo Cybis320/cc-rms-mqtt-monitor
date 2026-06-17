@@ -130,6 +130,27 @@ def collect_capture(station, now=None):
 
 
 # ---------------------------------------------------------------------------
+# Platepar (camera pointing)
+# ---------------------------------------------------------------------------
+
+
+def collect_platepar(station):
+    """Camera pointing (centre of field) from the station's platepar, rounded to
+    whole degrees. Fields omitted if the platepar is missing/unreadable."""
+    result = {}
+    try:
+        with open(station.platepar_path) as fh:
+            pp = json.load(fh)
+    except (IOError, OSError, ValueError):
+        return result
+    for key in ("alt_centre", "az_centre"):
+        val = pp.get(key)
+        if isinstance(val, (int, float)):
+            result[key] = round(val)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Frame images (daytime / continuous output, written to FramesFiles)
 # ---------------------------------------------------------------------------
 
@@ -503,6 +524,7 @@ def collect_station(station, max_log_lines, now=None):
     metrics = {"station_id": station.station_id}
     metrics.update(collect_process(station))
     metrics.update(collect_capture(station, now))
+    metrics.update(collect_platepar(station))
     metrics.update(collect_frames(station, now))
     metrics.update(collect_timelapse(station, now))
     metrics.update(collect_detection(station, now))

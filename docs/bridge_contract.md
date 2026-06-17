@@ -28,6 +28,8 @@ Distinguish the two `health` shapes by payload:
 - `maintenance` (bool) + `maintenance_reason` — expected-disruption flag (see §4)
 - `lat`, `lon` — approximate station coordinates (decimal degrees, rounded to
   ~1 km); present only when the RMS `.config` has coordinates. For dashboard maps.
+- `alt_centre`, `az_centre` — camera pointing (centre of field), whole degrees,
+  from the station's platepar; present only when the platepar is readable.
 - `host`, `timestamp` (ISO-8601 UTC)
 
 **Host** (`stations/<host>/health`):

@@ -35,6 +35,7 @@ class Station:
     log_dir: str
     upload_queue_file: str
     frame_dir: str = "FramesFiles"
+    platepar_name: str = "platepar_cmn2010.cal"
     # Operator-defined grouping straight from the RMS .config (camera cluster /
     # location). None when unset ("none"). This is the primary subscription group.
     camera_group_name: str = None
@@ -56,6 +57,11 @@ class Station:
     @property
     def frames_path(self):
         return os.path.join(self.data_dir, self.frame_dir)
+
+    @property
+    def platepar_path(self):
+        # The platepar lives in the station's config directory (next to .config).
+        return os.path.join(os.path.dirname(self.config_path), self.platepar_name)
 
     @property
     def has_location(self):
@@ -127,6 +133,7 @@ def _station_from_config(config_path):
         log_dir=cfg.get("log_dir", _DEFAULTS["log_dir"]),
         upload_queue_file=cfg.get("upload_queue_file", _DEFAULTS["upload_queue_file"]),
         frame_dir=cfg.get("frame_dir", "FramesFiles"),
+        platepar_name=cfg.get("platepar_name", "platepar_cmn2010.cal"),
         camera_group_name=camera_group_name,
         continuous_capture=_as_bool(cfg.get("continuous_capture")),
         switch_camera_modes=_as_bool(cfg.get("switch_camera_modes")),
