@@ -78,7 +78,7 @@ if [ ! -f "$DEST/config.yaml" ]; then
     DETECTED="$(grep -hE '^[[:space:]]*camera_group_name:' \
                     "$STATIONS_DIR"/*/.config "$RMS_DIR/.config" 2>/dev/null \
                 | sed -E 's/^[[:space:]]*camera_group_name:[[:space:]]*//; s/[[:space:]]*$//' \
-                | grep -viE '^(none)?$' | sort -u | head -n1)"
+                | grep -viE '^(none)?$' | sort -u | head -n1 || true)"
     HOST="$(hostname)"
 
     # Decide the subscription group. Blank GROUP -> leave config.group null so
@@ -247,7 +247,7 @@ info "  weblog_enable: false is NOT transmitted to MQTT (and any prior data is"
 info "  cleared); a host with no opted-in cameras transmits nothing at all."
 OPTED_OUT="$(grep -lEi '^[[:space:]]*weblog_enable:[[:space:]]*(false|0|no)' \
                  "${CC_STATIONS_DIR:-$HOME/source/Stations}"/*/.config \
-                 "${CC_RMS_DIR:-$HOME/source/RMS}/.config" 2>/dev/null | wc -l)"
+                 "${CC_RMS_DIR:-$HOME/source/RMS}/.config" 2>/dev/null | wc -l || true)"
 if [ "${OPTED_OUT:-0}" -gt 0 ]; then
     warn "  ${OPTED_OUT} station config(s) here have weblog_enable=false -> not published."
 fi
