@@ -4,7 +4,9 @@ A standalone, host-level agent that monitors the health of every
 [RMS](https://github.com/CroatianMeteorNetwork/RMS) meteor-camera station on a
 machine and publishes it to an MQTT broker as one retained plain-JSON blob per
 station (plus a host/OS blob). A broker-side ntfy + Telegram bridge consumes
-those topics for alerting, and they're equally usable by any custom dashboard.
+those topics for alerting, a public read-only dashboard at
+**https://status.contrailcast.com** renders the live fleet from the same feed,
+and the topics are equally usable by any custom dashboard.
 
 It supports both deployment schemes automatically:
 
@@ -132,28 +134,30 @@ Example `health` payload:
 override); **`group_slug`** is the canonical subscription handle — spaces/
 punctuation collapsed to `-` so it is valid as an ntfy topic / Telegram tag.
 
-### Ways to subscribe (ntfy / Telegram)
+### What to subscribe to (handles)
 
-The bridge fans each alert out to several topics, so you pick the granularity:
+The bridge fans each alert out to several **handles** — and a handle is the same
+string on both channels: it's the ntfy topic name *and* the Telegram token, so it
+means the same thing whichever app you use (see "How to receive them" below).
+Pick your granularity:
 
-| Subscribe to | Covers |
+| Handle | Covers |
 |---|---|
-| `cc-<group_slug>` | your whole group (e.g. `cc-Phoenix-1`) |
-| `cc-<stationID>` | one camera (e.g. `cc-US005A`) |
-| `cc-<prefix>` | **a whole network** — any leading prefix of a station ID **of 3+ characters** (`cc-USC`, `cc-CAC`, `cc-USL`, `cc-USV`, …) |
+| `<group_slug>` | your whole group (e.g. `Phoenix-1`) |
+| `<stationID>` | one camera (e.g. `US005A`) |
+| `<prefix>` | **a whole network** — any leading prefix of a station ID **of 3+ characters** (`USC`, `CAC`, `USL`, `USV`, …) |
 
 The prefix axis is the important one for network coordinators: subscribe to
-`cc-USC` (or `cc-CAC`, …) **once**, and every current *and future* station whose
-ID starts with that prefix is covered automatically — no ntfy change is needed
+`USC` (or `CAC`, …) **once**, and every current *and future* station whose
+ID starts with that prefix is covered automatically — no change is needed
 when a new station is deployed, because the bridge publishes each station's
 alerts to all of its ID prefixes (from 3 chars up to the full ID) as soon as its
-monitor comes online. Prefixes shorter than 3 chars (`cc-U`, `cc-US`) are not
-published — they'd carry every station's traffic and hit ntfy rate limits. The
-network codes (`USC`, `CAC`, `USL`, `USV`, …) are all 3 chars, so the floor
-covers each of them.
+monitor comes online. Prefixes shorter than 3 chars (`U`, `US`) are not
+published — they'd carry every station's traffic. The network codes
+(`USC`, `CAC`, `USL`, `USV`, …) are all 3 chars, so the floor covers each.
 
 The host record carries `groups` + `group_slugs` + `station_ids`, so host-level
-(OOM/memory) alerts fan out to the same group and prefix topics.
+(OOM/memory) alerts fan out to the same group and prefix handles.
 
 ### How to receive them (Telegram or ntfy)
 
@@ -174,9 +178,10 @@ A prefix token like `USC` auto-covers every current *and future* station with
 that prefix — subscribe once.
 
 **ntfy — great on Android / desktop / web; limited on iOS.** Install the ntfy
-app, point it at the bridge's ntfy server (**`https://ntfy.contrailcast.com`**), and add the
-topic **`cc-<token>`** (e.g. `cc-Phoenix-1`, `cc-USC`). The installer prints your
-host's exact topics at the end of a deploy.
+app, point it at the bridge's ntfy server (**`https://ntfy.contrailcast.com`**),
+and add the handle **`<handle>`** as a topic (e.g. `Phoenix-1`, `USC`) — or open
+`https://ntfy.contrailcast.com/<handle>` in a browser. The installer prints your
+host's exact handles at the end of a deploy.
 
 > **iOS caveat:** ntfy's iPhone/iPad app only receives background push through
 > the public `ntfy.sh` infrastructure — a self-hosted server has to be configured
@@ -296,7 +301,7 @@ python -m cc_mqtt_monitor --config config.yaml --test
 
 `--test` publishes a single, non-retained, clearly-marked alert carrying this
 host's real `group_slug` and a `<station>-TEST` id, so it routes to your normal
-subscriptions (`cc-<group_slug>` and the network `cc-<prefix>`). It uses a
+subscriptions (`<group_slug>` and the network `<prefix>`). It uses a
 separate client id and no Last-Will, so it never disturbs the running service's
 status. If you receive it in ntfy/Telegram, the chain works.
 

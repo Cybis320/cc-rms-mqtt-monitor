@@ -44,7 +44,8 @@ maintenance_file: null             # optional GRMSUpdater lock path to clean up
 
 # Subscription-group OVERRIDE (the installer asks and sets this). When set it
 # applies to every station on this host; when null, each station uses its own
-# RMS camera_group_name. Subscribers use cc-<slug-of-group>.
+# RMS camera_group_name. Subscribers use <slug-of-group> (the same handle on
+# ntfy and Telegram).
 group: null
 
 # Health checks to silence (by key), e.g. [dropped_frames, upload_backlog].

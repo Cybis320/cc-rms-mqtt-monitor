@@ -216,13 +216,15 @@ else
 fi
 
 # --- 5. ntfy subscription help ---------------------------------------------
-# Print the exact topics to subscribe to, derived from this host's own data.
-# (Topics use the "cc-" prefix per the contrailcast ntfy/Telegram bridge.)
+# Print the exact handles to subscribe to, derived from this host's own data.
+# (Handles are bare tags -- identical on ntfy and Telegram, no prefix.)
 echo
-info "Get alerts via Telegram (all platforms, best on iOS) or ntfy (Android/desktop/web):"
-info "  Telegram: message @contrailcast_rms_bot  ->  /subscribe <token>   (token = a cc- name below, without 'cc-')"
-info "  ntfy:     app server https://ntfy.contrailcast.com  ->  subscribe to the cc- topics below"
+info "Get alerts via Telegram (all platforms, best on iOS) or ntfy (Android/desktop/web)."
+info "Subscribe to a HANDLE below -- the same string works on both channels:"
+info "  Telegram: message @contrailcast_rms_bot  ->  /subscribe <handle>"
+info "  ntfy:     app server https://ntfy.contrailcast.com  ->  subscribe to <handle>"
 info "            (ntfy iOS push is limited; on iPhone/iPad use Telegram)"
+info "Live dashboard (no app): https://status.contrailcast.com"
 "$PY" -m cc_mqtt_monitor --config "$DEST/config.yaml" --status 2>/dev/null | "$PY" -c '
 import sys, json
 try:
@@ -233,10 +235,10 @@ stations = d.get("stations", [])
 slugs = sorted({s.get("group_slug") for s in stations if s.get("group_slug")})
 sids = [s["station_id"] for s in stations]
 for sl in slugs:
-    print("    your group         ->  cc-%s" % sl)
+    print("    your group         ->  %s" % sl)
 for sid in sids:
-    print("    one camera         ->  cc-%s" % sid)
-print("    a whole network    ->  cc-USC, cc-CAC, cc-USL, cc-USV, ...")
+    print("    one camera         ->  %s" % sid)
+print("    a whole network    ->  USC, CAC, USL, USV, ...")
 print("                           any leading prefix of a station ID, 3+ chars.")
 print("                           Subscribe to a network prefix ONCE and every current")
 print("                           AND future station with that prefix is covered")

@@ -3,8 +3,10 @@
 Instructions for the broker-side alert bridge. The station monitor
 (`cc-rms-mqtt-monitor`) only *publishes retained JSON state*; this bridge turns
 that into ntfy/Telegram notifications. Topic/namespace: everything is under
-`stations/#` (the broker ACL only allows that tree). Alert topics use the
-`cc-` prefix.
+`stations/#` (the broker ACL only allows that tree). Alerts fan out to a set of
+**handles** (§3); a handle is the Telegram token and, on ntfy, the topic name
+with an optional configurable prefix (`ntfy.topic_prefix`) — **empty in the
+contrailcast deployment**, so the handle is identical on both channels.
 
 ## 1. Subscribe (input from the monitor)
 
@@ -48,31 +50,31 @@ down → all its stations are stale. Use the host's last `health` record (its
 
 ## 3. Fan-out axes (the important part)
 
-For **each station alert**, publish the notification to these ntfy topics
-(and match them in Telegram):
+For **each station alert**, publish the notification to these handles (each is
+an ntfy topic — prefixed by `ntfy.topic_prefix` if set — and a Telegram match):
 
-- `cc-<group_slug>`                     — the operator's group
-- **`cc-<P>` for every leading prefix P of `station_id` with `len(P) >= 3`** —
-  `cc-USC`, `cc-USC0`, … up to `cc-<full station_id>`
+- `<group_slug>`                        — the operator's group
+- **`<P>` for every leading prefix P of `station_id` with `len(P) >= 3`** —
+  `USC`, `USC0`, … up to `<full station_id>`
 
-Prefixes shorter than 3 chars (`cc-U`, `cc-US`) are **deliberately skipped**:
-they'd each receive *every* station's alerts and hit ntfy rate limits.
+Prefixes shorter than 3 chars (`U`, `US`) are **deliberately skipped**:
+they'd each receive *every* station's alerts.
 
-The prefix expansion is what lets a coordinator **subscribe to `cc-USC`
-(or `cc-CAC`, `cc-USL`) once** and automatically receive every current *and
+The prefix expansion is what lets a coordinator **subscribe to `USC`
+(or `CAC`, `USL`) once** and automatically receive every current *and
 future* station whose ID starts with that prefix — no action when a new station
 deploys. Keep the expansion from 3 chars up to the full ID (don't collapse it to
-only the full ID, or `cc-USC`-style network subscriptions stop working).
+only the full ID, or `USC`-style network subscriptions stop working).
 
 > The network codes (`USC`, `CAC`, `USL`, `USV`, …) are all 3 chars, so the
 > 3-char floor covers every one of them.
 
 For **each host alert** (and the offline Last-Will), fan out to:
-- `cc-<group_slug>` for each entry in `group_slugs`
-- `cc-<P>` for every prefix P (`len >= 3`) of each entry in `station_ids`
+- `<group_slug>` for each entry in `group_slugs`
+- `<P>` for every prefix P (`len >= 3`) of each entry in `station_ids`
 
-Station IDs are alphanumeric and `group_slug` is pre-slugified, so every `cc-<…>`
-is a valid ntfy topic / Telegram tag (no spaces).
+Station IDs are alphanumeric and `group_slug` is pre-slugified, so every handle
+is a valid ntfy topic / Telegram token (no spaces).
 
 ## 4. Don't alert on EXPECTED disruption (use the monitor's `maintenance` flag)
 
@@ -120,7 +122,7 @@ expected.
 Telegram can't subscribe by topic, so the bot keeps `chat_id → {tokens}` and
 matches each alert:
 - a token matches if it equals the alert's `group_slug`, **or** the `station_id`
-  starts with the token (prefix match — same `cc-USC` semantics).
+  starts with the token (prefix match — same `USC` semantics).
 - commands: `/subscribe <token>`, `/unsubscribe <token>`, `/list`.
 - prefix tokens (e.g. `USC`) give the same "subscribe once, future stations
   auto-covered" behavior as ntfy.
@@ -139,12 +141,12 @@ tests, a host test won't fan out to `group_slugs`/`station_ids` and you'll see
 
 - `cc-rms-monitor --test` → a one-off, **non-retained** *station* record
   (`status: degraded`, a `<station>-TEST` id, the host's real `group_slug`).
-  Fans out on the **station** axes (§3): `cc-<group_slug>` + `cc-<prefix>`.
+  Fans out on the **station** axes (§3): `<group_slug>` + `<prefix>`.
 - `cc-rms-monitor --test-udp [RATE]` → a one-off, **non-retained** *host* record
   on `stations/<host>/health` with a real `udp_rcvbuf_errors` problem (simulated
   `udp_rcvbuf_errors_per_min`, default 999) and the host's real
   `group_slugs`/`station_ids`. Fans out on the **host** axes (§3):
-  `cc-<group_slug>` for each `group_slugs` entry + `cc-<prefix>` for each
+  `<group_slug>` for each `group_slugs` entry + `<prefix>` for each
   `station_ids`. The real retained host record is left untouched.
 
 ## 8. Notes
