@@ -127,18 +127,25 @@ matches each alert:
 
 ## 7. Test alerts
 
-`cc-rms-monitor --test` publishes a one-off, **non-retained** station record with
-`"test": true`, `status: "degraded"`, a `<station>-TEST` id, and the host's real
-`group_slug`. Route it exactly like a normal alert (so the operator confirms the
-chain) — optionally tag it as a test / lower priority, and **don't** persist it
-in your notify-on-change state (the id never recovers).
+**A `test: true` record is NOT a special routing case.** Route it through the
+exact same fan-out as a real record *of the same kind* (§3) — classify it as a
+station vs host record by the §1 rule (`station_ids` present ⇒ host record), then
+fan out on the same axes. The *only* difference from a real alert is: **don't**
+persist it in your notify-on-change state (a `<…>-TEST`/burst id never recovers),
+and optionally tag it as a test / lower priority. Do **not** branch test records
+onto a narrower path — if you only read a singular `group_slug`/`station_id` for
+tests, a host test won't fan out to `group_slugs`/`station_ids` and you'll see
+"the test didn't fan out like a real message."
 
-`cc-rms-monitor --test-udp [RATE]` publishes a one-off, **non-retained**
-*host* record (on `stations/<host>/health`) with `"test": true` and a real
-`udp_rcvbuf_errors` problem (simulated `udp_rcvbuf_errors_per_min`, default 999),
-carrying the host's real `group_slugs`/`station_ids`. Use it to exercise the
-**host** alert fan-out (§3). Same rule: it's non-retained and `test: true`, so
-don't persist it — the real retained host record is left untouched.
+- `cc-rms-monitor --test` → a one-off, **non-retained** *station* record
+  (`status: degraded`, a `<station>-TEST` id, the host's real `group_slug`).
+  Fans out on the **station** axes (§3): `cc-<group_slug>` + `cc-<prefix>`.
+- `cc-rms-monitor --test-udp [RATE]` → a one-off, **non-retained** *host* record
+  on `stations/<host>/health` with a real `udp_rcvbuf_errors` problem (simulated
+  `udp_rcvbuf_errors_per_min`, default 999) and the host's real
+  `group_slugs`/`station_ids`. Fans out on the **host** axes (§3):
+  `cc-<group_slug>` for each `group_slugs` entry + `cc-<prefix>` for each
+  `station_ids`. The real retained host record is left untouched.
 
 ## 8. Notes
 
