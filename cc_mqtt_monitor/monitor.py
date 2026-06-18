@@ -115,6 +115,38 @@ def make_test_state(config):
     }
 
 
+def make_udp_test_state(config, rate=999.0):
+    """A host-level UDP RcvbufErrors test alert that routes like the real thing.
+
+    Builds a genuine host record from live metrics, then injects a simulated
+    growth `rate` so the real evaluate_host() path produces the actual alert
+    payload a bridge would receive -- marked test:true and prefixed TEST, routed
+    to this host's groups, and published non-retained so the retained host record
+    is untouched."""
+    from .oslevel import collect_host, read_udp_stats
+    stations = _consenting_stations(config)
+    now = time.time()
+    metrics = collect_host(udp=True)
+    metrics["udp_rcvbuf_errors_per_min"] = rate          # simulated burst
+    if metrics.get("udp_rcvbuf_errors") is None:
+        metrics["udp_rcvbuf_errors"] = read_udp_stats()[0] or 0
+    if metrics.get("udp_rcvbuf_error_pct") is None:
+        metrics["udp_rcvbuf_error_pct"] = 0.0
+    # Ensure the udp check fires even if it's in disabled_checks for this host.
+    disabled = set(config.disabled_checks or []) - {"udp_rcvbuf_errors"}
+    state = build_host_state(metrics, config.thresholds, config.host_name,
+                             _iso(now), disabled)
+    groups = sorted({g for g in (_station_group(s, config) for s in stations) if g})
+    state["groups"] = groups
+    state["group_slugs"] = [_slug(g) for g in groups]
+    state["station_ids"] = [s.station_id for s in stations]
+    state["maintenance"] = False
+    state["maintenance_reason"] = None
+    state["test"] = True
+    state["problems"] = ["\U0001F9EA TEST: %s" % p for p in state["problems"]]
+    return state
+
+
 def run_once(config, publisher=None):
     """Collect host + every station once and (optionally) publish."""
     maint = maintenance.detect(config)            # one scan per cycle, shared

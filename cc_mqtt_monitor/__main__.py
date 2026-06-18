@@ -35,6 +35,10 @@ def main(argv=None):
                         help="subscribe to the broker and show a live status table")
     parser.add_argument("--test", action="store_true",
                         help="publish one test alert to exercise the broker->ntfy/Telegram chain, then exit")
+    parser.add_argument("--test-udp", nargs="?", const=999.0, type=float, metavar="RATE",
+                        help="publish one transient host-level UDP RcvbufErrors test alert "
+                             "(optional simulated RATE per minute, default 999) so the bridge "
+                             "can see the host alert path, then exit")
     parser.add_argument("--interval", type=int,
                         help="override the polling interval in seconds")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -77,6 +81,23 @@ def main(argv=None):
         if gs:
             print("    cc-%s        (your group)" % gs)
         print("    cc-%s   (this station) and any prefix, e.g. cc-%s" % (sid, sid[:3]))
+        return 0
+
+    # --test-udp: publish one transient host-level UDP RcvbufErrors test alert.
+    if args.test_udp is not None:
+        from .publisher import Publisher
+        state = monitor.make_udp_test_state(config, args.test_udp)
+        publisher = Publisher(config, announce=False)
+        publisher.connect()
+        try:
+            publisher.publish_test_host(state)
+        finally:
+            publisher.disconnect()
+        print("UDP test host alert sent (non-retained) to %s/%s/health:"
+              % (config.topic_prefix, config.host_name))
+        print(json.dumps(state, indent=2, default=str))
+        print("\nBridge should route it to:", ", ".join(
+            "cc-%s" % gs for gs in state.get("group_slugs") if gs) or "(no group_slug)")
         return 0
 
     # Publishing paths need paho + a broker.

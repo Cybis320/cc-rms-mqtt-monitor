@@ -33,10 +33,14 @@ Distinguish the two `health` shapes by payload:
 - `host`, `timestamp` (ISO-8601 UTC)
 
 **Host** (`stations/<host>/health`):
-- `status`, `problems` (OOM / memory)
+- `status`, `problems` (OOM / memory / UDP RcvbufErrors)
 - `station_ids` — list of cameras on that host
 - `groups`, `group_slugs` — distinct groups on that host
 - `host`, `timestamp`
+- *UDP-only (present when a station uses `protocol: udp`):* `udp_rcvbuf_errors`
+  (cumulative), `udp_rcvbuf_errors_per_min` (growth rate — the alert signal),
+  `udp_rcvbuf_error_pct`, `udp_in_datagrams`, `udp_rmem_max`. A
+  `udp_rcvbuf_errors` problem is host-wide; route it like any host alert (§3).
 
 **Last-Will** (`stations/<host>/status`): `offline` ⇒ that host's agent/host is
 down → all its stations are stale. Use the host's last `health` record (its
@@ -128,6 +132,13 @@ matches each alert:
 `group_slug`. Route it exactly like a normal alert (so the operator confirms the
 chain) — optionally tag it as a test / lower priority, and **don't** persist it
 in your notify-on-change state (the id never recovers).
+
+`cc-rms-monitor --test-udp [RATE]` publishes a one-off, **non-retained**
+*host* record (on `stations/<host>/health`) with `"test": true` and a real
+`udp_rcvbuf_errors` problem (simulated `udp_rcvbuf_errors_per_min`, default 999),
+carrying the host's real `group_slugs`/`station_ids`. Use it to exercise the
+**host** alert fan-out (§3). Same rule: it's non-retained and `test: true`, so
+don't persist it — the real retained host record is left untouched.
 
 ## 8. Notes
 

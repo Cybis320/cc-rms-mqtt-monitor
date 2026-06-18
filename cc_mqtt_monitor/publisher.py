@@ -104,6 +104,13 @@ class Publisher:
                       json.dumps(state, default=str), retain=False)
         self.flush()
 
+    def publish_test_host(self, state):
+        # A host-level test alert -> the host health topic, non-retained so the
+        # real retained host record is left untouched.
+        self._publish(self._host_state_topic(),
+                      json.dumps(state, default=str), retain=False)
+        self.flush()
+
     def clear_station(self, station_id):
         """Remove a station's retained record (empty retained payload), e.g. when
         it is newly opted out of publishing so its old data doesn't linger."""
