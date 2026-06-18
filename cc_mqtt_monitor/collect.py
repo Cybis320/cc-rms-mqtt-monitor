@@ -595,6 +595,7 @@ def collect_mode(station, now=None):
     now = now or time.time()
     result = {
         "continuous_capture": station.continuous_capture,
+        "switch_camera_modes": station.switch_camera_modes,
         "save_frames": station.save_frames,
         "solar_elevation_deg": None,
         "expected_output": None,
