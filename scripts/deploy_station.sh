@@ -23,6 +23,17 @@ RUN_USER="$(id -un)"
 info() { printf '\033[32m[deploy]\033[0m %s\n' "$1"; }
 warn() { printf '\033[33m[deploy]\033[0m %s\n' "$1"; }
 
+# --- 0. Validate sudo up front (the systemd step below needs it) ------------
+# Otherwise a sudo failure under `set -e` silently aborts AFTER the package is
+# installed -- leaving no service and no error (the classic `curl | bash` trap).
+if command -v systemctl >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then
+    if ! sudo -v; then
+        warn "This installer needs sudo to install the systemd service."
+        warn "Run it from an interactive shell (not 'curl | bash') or as root, then retry."
+        exit 1
+    fi
+fi
+
 # --- 1. Get the code --------------------------------------------------------
 # If we're already running from inside a clone, use it; otherwise clone/update.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
@@ -171,21 +182,32 @@ EOF
 
 if command -v systemctl >/dev/null 2>&1; then
     if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+    manual_hint() {
+        warn "systemd step FAILED -- package is installed but NOT running as a service."
+        warn "Finish manually as root:"
+        warn "  sudo cp systemd/${SERVICE_NAME}.service /etc/systemd/system/   # then fix User=/ExecStart paths"
+        warn "  sudo systemctl daemon-reload && sudo systemctl enable --now ${SERVICE_NAME}"
+    }
     info "Installing systemd service ($UNIT_PATH)"
-    render_unit | $SUDO tee "$UNIT_PATH" >/dev/null
+    if ! render_unit | $SUDO tee "$UNIT_PATH" >/dev/null; then manual_hint; exit 1; fi
     chmod +x "$DEST/scripts/autoupdate.sh" 2>/dev/null || true
 
     if [ "${CC_NO_AUTOUPDATE:-0}" != "1" ]; then
         info "Installing auto-update timer (${CC_UPDATE_INTERVAL:-15min})"
-        render_update_service | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}-update.service" >/dev/null
-        render_update_timer   | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}-update.timer"   >/dev/null
+        render_update_service | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}-update.service" >/dev/null || true
+        render_update_timer   | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}-update.timer"   >/dev/null || true
     fi
 
-    $SUDO systemctl daemon-reload
-    $SUDO systemctl enable --now "$SERVICE_NAME"
-    [ "${CC_NO_AUTOUPDATE:-0}" != "1" ] && $SUDO systemctl enable --now "${SERVICE_NAME}-update.timer"
-    info "Service started. Status:"
-    $SUDO systemctl --no-pager --lines=0 status "$SERVICE_NAME" || true
+    $SUDO systemctl daemon-reload || { manual_hint; exit 1; }
+    if ! $SUDO systemctl enable --now "$SERVICE_NAME"; then manual_hint; exit 1; fi
+    [ "${CC_NO_AUTOUPDATE:-0}" != "1" ] && $SUDO systemctl enable --now "${SERVICE_NAME}-update.timer" || true
+
+    # Verify it actually came up -- don't claim success over a dead service.
+    if $SUDO systemctl is-active --quiet "$SERVICE_NAME"; then
+        info "Service active: $SERVICE_NAME"
+    else
+        warn "Service installed but NOT active -- check: journalctl -u $SERVICE_NAME -n 50"
+    fi
     echo
     info "Follow logs with:  journalctl -u $SERVICE_NAME -f"
     [ "${CC_NO_AUTOUPDATE:-0}" != "1" ] && info "Auto-update runs every ${CC_UPDATE_INTERVAL:-15min}; check: systemctl list-timers ${SERVICE_NAME}-update.timer"
