@@ -338,8 +338,16 @@ _BUFFER_RE = re.compile(
 
 
 def _newest_log(station):
-    pattern = os.path.join(station.log_path, "*log_%s_*.log" % station.station_id)
-    logs = glob.glob(pattern) or glob.glob(os.path.join(station.log_path, "*.log"))
+    # RMS capture logs are named "log_<stationID>_<timestamp>_NNN.log". Anchor
+    # the pattern to that "log_" prefix: a leading "*" would also match
+    # "reprocess_log_<id>_*.log", which sorts AFTER "log_..." by name (so max()
+    # would pick a stale reprocess log) and carries no capture/buffer lines.
+    logs = glob.glob(os.path.join(station.log_path, "log_%s_*.log" % station.station_id))
+    if not logs:
+        # Fallbacks keep the "log_" anchor (still excluding reprocess_/launcher
+        # prefixes); only as a last resort fall back to any .log.
+        logs = (glob.glob(os.path.join(station.log_path, "log_*.log"))
+                or glob.glob(os.path.join(station.log_path, "*.log")))
     if not logs:
         return None
     return max(logs)   # latest log by name (filename carries a sortable timestamp)
