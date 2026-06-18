@@ -495,6 +495,32 @@ def rms_branch(rms_dir):
     return (out.stdout or "").strip() or None
 
 
+def rms_behind(rms_dir):
+    """Commits the RMS checkout is behind its upstream tracking branch, using
+    only local refs (no fetch -- it reflects RMS's last update check, so it can't
+    perturb RMS or hit the network). 0 = up to date; a positive int = behind;
+    None when undeterminable (no upstream tracking set, detached HEAD, or not a
+    git repo). This is the live, every-cycle counterpart to RMS's once-a-night
+    `summary.repository_lag_remote_days`.
+    """
+    rms_dir = os.path.expanduser(rms_dir or "")
+    if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", rms_dir, "rev-list", "--count", "HEAD..@{u}"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=10, universal_newlines=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        return int((out.stdout or "").strip())
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Upload backlog and disk
 # ---------------------------------------------------------------------------
