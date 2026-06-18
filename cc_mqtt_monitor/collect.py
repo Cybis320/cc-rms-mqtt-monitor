@@ -24,15 +24,17 @@ _STARTCAPTURE_MARKER = "RMS.StartCapture"
 
 
 def _iter_proc():
-    """Yield (pid, cmdline_str, ppid, vmrss_kb) for every readable process."""
+    """Yield (pid, args, ppid, vmrss_kb) for every readable process; args is the
+    argv list."""
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
         pid = int(entry)
         try:
             with open("/proc/%d/cmdline" % pid, "rb") as fh:
-                cmdline = fh.read().replace(b"\x00", b" ").decode("utf-8", "replace").strip()
-            if not cmdline:
+                args = [a.decode("utf-8", "replace")
+                        for a in fh.read().split(b"\x00") if a]
+            if not args:
                 continue
             ppid = 0
             vmrss_kb = 0
@@ -44,20 +46,48 @@ def _iter_proc():
                         vmrss_kb = int(line.split()[1])
         except (IOError, OSError, ValueError):
             continue
-        yield pid, cmdline, ppid, vmrss_kb
+        yield pid, args, ppid, vmrss_kb
+
+
+def _process_config_path(pid, args):
+    """The .config a StartCapture process uses: the ``-c/--config`` argument when
+    given (multicam), else the default ``.config`` in the process's working
+    directory (single-cam runs StartCapture with no ``-c`` from the RMS dir)."""
+    cfg = None
+    for i, a in enumerate(args):
+        if a in ("-c", "--config") and i + 1 < len(args):
+            cfg = args[i + 1]
+            break
+        if a.startswith("--config="):
+            cfg = a.split("=", 1)[1]
+            break
+        if a.startswith("-c="):
+            cfg = a.split("=", 1)[1]
+            break
+    if cfg and os.path.isabs(cfg):
+        return os.path.abspath(cfg)
+    # No -c, or a relative -c: resolve against the process's working directory.
+    try:
+        cwd = os.readlink("/proc/%d/cwd" % pid)
+    except OSError:
+        return None
+    return os.path.abspath(os.path.join(cwd, cfg or ".config"))
 
 
 def collect_process(station):
     """Detect whether the station's capture process tree is alive.
 
-    A station is launched as ``python -u -m RMS.StartCapture -c <config>``; the
-    multiprocessing children inherit the same command line, so we match on the
-    config path. The "main" process is the matching PID whose parent is not
-    itself a matching PID.
+    A StartCapture process is matched to its station by the .config it actually
+    uses -- the ``-c`` argument (multicam) or its working-directory default
+    ``.config`` (single-cam, launched with no ``-c``). The "main" process is the
+    matching PID whose parent is not itself a matching PID.
     """
+    target = os.path.abspath(station.config_path)
     matches = []  # (pid, ppid, vmrss_kb)
-    for pid, cmdline, ppid, vmrss_kb in _iter_proc():
-        if _STARTCAPTURE_MARKER in cmdline and station.config_path in cmdline:
+    for pid, args, ppid, vmrss_kb in _iter_proc():
+        if not any(_STARTCAPTURE_MARKER in a for a in args):
+            continue
+        if _process_config_path(pid, args) == target:
             matches.append((pid, ppid, vmrss_kb))
 
     match_pids = {pid for pid, _, _ in matches}
