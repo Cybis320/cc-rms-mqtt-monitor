@@ -194,10 +194,12 @@ def evaluate_host(metrics, thresholds, disabled=()):
     # UDP receive-buffer overflows climbing (kernel-dropped RTSP datagrams; the
     # host-level analogue of dropped frames). Rate-based: a null rate (first
     # cycle / counter reset) is not flagged. Only present when a station is UDP.
+    # Strictly-greater so the default threshold of 0 means "any increase"; a
+    # zero rate (no growth this cycle, the common case) never fires.
     rate = metrics.get("udp_rcvbuf_errors_per_min")
-    if rate is not None and rate >= thresholds.udp_rcvbuf_errors_per_min_warn:
+    if rate is not None and rate > thresholds.udp_rcvbuf_errors_per_min_warn:
         flag(DEGRADED, "udp_rcvbuf_errors",
-             "UDP RcvbufErrors climbing: %.0f/min (%s total, %.4f%% of datagrams)"
+             "UDP RcvbufErrors climbing: %.1f/min (%s total, %.4f%% of datagrams)"
              % (rate, metrics.get("udp_rcvbuf_errors"),
                 metrics.get("udp_rcvbuf_error_pct") or 0.0))
 
