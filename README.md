@@ -221,6 +221,32 @@ sudo systemctl disable --now cc-rms-monitor-update.timer  # stop auto-updates
 > `stable` branch (`CC_BRANCH=stable`) and fast-forward `stable` only when you've
 > verified a change — same mechanism, controlled blast radius.
 
+## Uninstall
+
+```bash
+# From inside the checkout (or anywhere — it finds the install):
+./scripts/uninstall_station.sh
+```
+
+This is the inverse of the installer and is safe to re-run. It:
+
+1. stops, disables, and removes the systemd service **and** the auto-update timer;
+2. clears this host's **retained broker records** (status + host + every station)
+   so nothing lingers on the dashboard after removal.
+
+By default it **leaves the checkout and `config.yaml` in place**, so a later
+re-install keeps your settings. To remove those too (uninstall the package and
+delete the folder):
+
+```bash
+CC_PURGE=1 ./scripts/uninstall_station.sh
+```
+
+> The systemd steps need `sudo` (same as install). If you don't have it, the
+> manual equivalent is `sudo systemctl disable --now cc-rms-monitor.service
+> cc-rms-monitor-update.timer` then remove `/etc/systemd/system/cc-rms-monitor*`.
+> To clear the broker by hand: `python -m cc_mqtt_monitor --unpublish`.
+
 ## Usage
 
 ```bash

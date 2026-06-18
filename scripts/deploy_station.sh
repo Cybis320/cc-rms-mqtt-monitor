@@ -252,4 +252,7 @@ if [ "${OPTED_OUT:-0}" -gt 0 ]; then
     warn "  ${OPTED_OUT} station config(s) here have weblog_enable=false -> not published."
 fi
 
+echo
+info "To remove later: ./scripts/uninstall_station.sh  (add CC_PURGE=1 to delete the checkout too)"
+
 info "Done."

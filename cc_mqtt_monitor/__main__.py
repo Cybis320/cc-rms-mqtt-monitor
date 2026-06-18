@@ -39,6 +39,10 @@ def main(argv=None):
                         help="publish one transient host-level UDP RcvbufErrors test alert "
                              "(optional simulated RATE per minute, default 999) so the bridge "
                              "can see the host alert path, then exit")
+    parser.add_argument("--unpublish", action="store_true",
+                        help="clear this host's retained broker records (status, host, "
+                             "and every station) and exit -- used by the uninstaller so "
+                             "nothing lingers on the dashboard after removal")
     parser.add_argument("--interval", type=int,
                         help="override the polling interval in seconds")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -98,6 +102,20 @@ def main(argv=None):
         print(json.dumps(state, indent=2, default=str))
         print("\nBridge should route it to:", ", ".join(
             "cc-%s" % gs for gs in state.get("group_slugs") if gs) or "(no group_slug)")
+        return 0
+
+    # --unpublish: wipe this host's retained records so nothing lingers after
+    # the agent is removed (used by the uninstaller). Clean disconnect => no
+    # "offline" Last-Will is left behind either.
+    if args.unpublish:
+        from .publisher import Publisher
+        from .discovery import discover_stations
+        sids = [s.station_id for s in discover_stations(config.stations_dir, config.rms_dir)]
+        publisher = Publisher(config, announce=False)
+        publisher.connect()
+        publisher.go_silent(sids)   # clears status + host + each station, then disconnects
+        print("Cleared retained broker records for host '%s'%s."
+              % (config.host_name, (" and stations %s" % sids) if sids else ""))
         return 0
 
     # Publishing paths need paho + a broker.
