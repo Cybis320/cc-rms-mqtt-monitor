@@ -125,6 +125,7 @@ Example `health` payload:
   "last_error": "ImportError: .../RMS/Routines/BinImageCy...so: cannot open shared object file",
   "disk_free_gb": 5216.1,
   "upload_queue_len": 0,
+  "rms_branch": "master",
   "host": "us005-host",
   "timestamp": "2026-06-15T17:40:00Z"
 }

@@ -11,6 +11,7 @@ import re
 import glob
 import json
 import shutil
+import subprocess
 import time
 
 from .solar import solar_elevation_deg
@@ -467,6 +468,31 @@ def collect_summary(station):
 
     result["summary"] = {k: data.get(k) for k in _SUMMARY_FIELDS if k in data}
     return result
+
+
+def rms_branch(rms_dir):
+    """Current git branch of the RMS code checkout (e.g. 'master', 'prerelease').
+
+    Read-only and offline -- it does not fetch, so it can't perturb RMS. Returns
+    None when rms_dir isn't a git checkout or git is unavailable; returns the
+    literal 'HEAD' that git reports for a detached checkout. Host-wide: every
+    camera on a box shares one RMS checkout, so the value is the same for all.
+    (Whether that branch is up to date is RMS's own
+    `summary.repository_lag_remote_days`, which already does the remote check.)
+    """
+    rms_dir = os.path.expanduser(rms_dir or "")
+    if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", rms_dir, "rev-parse", "--abbrev-ref", "HEAD"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=10, universal_newlines=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return (out.stdout or "").strip() or None
 
 
 # ---------------------------------------------------------------------------

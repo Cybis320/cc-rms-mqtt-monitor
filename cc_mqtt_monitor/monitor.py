@@ -5,7 +5,7 @@ import time
 import logging
 
 from .discovery import discover_stations
-from .collect import collect_station
+from .collect import collect_station, rms_branch
 from .oslevel import collect_host
 from .health import build_state, build_host_state
 from . import maintenance
@@ -47,6 +47,7 @@ def gather(config, maint=None):
     disabled = set(config.disabled_checks or [])
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     now = time.time()
+    branch = rms_branch(config.rms_dir)      # host-wide RMS git branch (one checkout)
     states = []
     for station in stations:
         metrics = collect_station(station, config.log_tail_lines, now)
@@ -56,6 +57,8 @@ def gather(config, maint=None):
         state["group_slug"] = _slug(group)   # canonical subscription handle
         state["maintenance"] = maint         # expected-disruption flag (bridge mutes)
         state["maintenance_reason"] = maint_reason
+        if branch:
+            state["rms_branch"] = branch     # which RMS code the station is running
         # Approximate coordinates for the dashboard map: obfuscated to ~1 km
         # (2 decimals). Omitted entirely when the .config has no coords.
         if station.has_location:
@@ -83,6 +86,9 @@ def gather_host(config, maint=None):
     state["groups"] = groups
     state["group_slugs"] = [_slug(g) for g in groups]
     state["station_ids"] = [s.station_id for s in stations]
+    branch = rms_branch(config.rms_dir)
+    if branch:
+        state["rms_branch"] = branch
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     state["maintenance"] = maint
     state["maintenance_reason"] = maint_reason
