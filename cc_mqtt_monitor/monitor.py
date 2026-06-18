@@ -72,7 +72,9 @@ def gather_host(config, maint=None):
     if not stations:
         return None
     disabled = set(config.disabled_checks or [])
-    metrics = collect_host()
+    # UDP RcvbufErrors are host-wide; collect them when any station uses UDP RTSP.
+    udp = any(s.protocol == "udp" for s in stations)
+    metrics = collect_host(udp=udp)
     state = build_host_state(metrics, config.thresholds, config.host_name,
                              _iso(time.time()), disabled)
     # A host can span several groups; list the distinct ones plus its stations,

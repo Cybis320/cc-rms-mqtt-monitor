@@ -85,12 +85,86 @@ def scan_oom(max_lines=1500):
     return result
 
 
-def collect_host(scan_oom_events=True):
-    """Host-wide metrics dict."""
+def read_udp_stats():
+    """Return (RcvbufErrors, InDatagrams) from /proc/net/snmp.
+
+    These are host-wide cumulative UDP counters (one kernel counter shared by
+    every UDP socket), so they belong to the host, not any single camera.
+    """
+    try:
+        with open("/proc/net/snmp") as fh:
+            lines = fh.readlines()
+    except (IOError, OSError):
+        return None, None
+    header = None
+    for line in lines:
+        if not line.startswith("Udp:"):
+            continue
+        cols = line.split()[1:]
+        if header is None:            # first "Udp:" line is the field-name row
+            header = cols
+            continue
+        row = dict(zip(header, cols))  # second "Udp:" line is the values row
+        try:
+            return int(row["RcvbufErrors"]), int(row["InDatagrams"])
+        except (KeyError, ValueError):
+            return None, None
+    return None, None
+
+
+def _rmem_max():
+    try:
+        with open("/proc/sys/net/core/rmem_max") as fh:
+            return int(fh.read().strip())
+    except (IOError, OSError, ValueError):
+        return None
+
+
+# Previous RcvbufErrors sample, so the long-running loop can derive a growth
+# rate (the raw counter only climbs / resets at boot). {"t": monotonic, "err"}.
+_UDP_LAST = {}
+
+
+def collect_udp_errors():
+    """Host-wide UDP receive-buffer overflow stats, with a per-minute rate.
+
+    RcvbufErrors counts datagrams the kernel dropped because a socket receive
+    buffer was full -- the host-level analogue of dropped frames for UDP RTSP.
+    It is cumulative and resets at boot, so the alertable signal is its growth
+    RATE: the delta since the previous cycle. The first sample (and any sample
+    after a counter reset) yields a null rate rather than a false spike.
+    """
+    err, dgrams = read_udp_stats()
+    result = {
+        "udp_rcvbuf_errors": err,              # cumulative since boot
+        "udp_in_datagrams": dgrams,            # cumulative since boot
+        "udp_rcvbuf_errors_per_min": None,     # growth rate (alert signal)
+        "udp_rcvbuf_error_pct": None,          # cumulative ratio (overview)
+        "udp_rmem_max": _rmem_max(),
+    }
+    if err is None:
+        return result
+    if dgrams:
+        result["udp_rcvbuf_error_pct"] = round(err / dgrams * 100.0, 4)
+    now = time.monotonic()
+    last_err, last_t = _UDP_LAST.get("err"), _UDP_LAST.get("t")
+    if last_err is not None and last_t is not None and now > last_t:
+        d_err = err - last_err
+        if d_err >= 0:   # negative => counter reset (reboot); skip this delta
+            result["udp_rcvbuf_errors_per_min"] = round(d_err / (now - last_t) * 60.0, 1)
+    _UDP_LAST["err"], _UDP_LAST["t"] = err, now
+    return result
+
+
+def collect_host(scan_oom_events=True, udp=False):
+    """Host-wide metrics dict. `udp=True` adds UDP RcvbufErrors stats (only
+    worth collecting when a station uses protocol: udp)."""
     metrics = read_meminfo()
     if scan_oom_events:
         metrics.update(scan_oom())
     metrics["uptime_s"] = _uptime()
+    if udp:
+        metrics.update(collect_udp_errors())
     return metrics
 
 

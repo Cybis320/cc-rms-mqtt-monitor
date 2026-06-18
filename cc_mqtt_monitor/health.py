@@ -35,6 +35,7 @@ CHECK_KEYS = (
     "dropped_frames",     # dropped frames in the last 10 min
     "oom",                # host OOM-killer fired
     "host_memory",        # host available memory low / critically low
+    "udp_rcvbuf_errors",  # host UDP receive-buffer overflows climbing (udp RTSP)
 )
 
 
@@ -189,6 +190,16 @@ def evaluate_host(metrics, thresholds, disabled=()):
             flag(ERROR, "host_memory", "Host memory critically low: %d MB available" % avail)
         elif avail <= thresholds.mem_available_warn_mb:
             flag(DEGRADED, "host_memory", "Host memory low: %d MB available" % avail)
+
+    # UDP receive-buffer overflows climbing (kernel-dropped RTSP datagrams; the
+    # host-level analogue of dropped frames). Rate-based: a null rate (first
+    # cycle / counter reset) is not flagged. Only present when a station is UDP.
+    rate = metrics.get("udp_rcvbuf_errors_per_min")
+    if rate is not None and rate >= thresholds.udp_rcvbuf_errors_per_min_warn:
+        flag(DEGRADED, "udp_rcvbuf_errors",
+             "UDP RcvbufErrors climbing: %.0f/min (%s total, %.4f%% of datagrams)"
+             % (rate, metrics.get("udp_rcvbuf_errors"),
+                metrics.get("udp_rcvbuf_error_pct") or 0.0))
 
     return state["status"], state["problems"]
 

@@ -52,6 +52,9 @@ class Station:
     elevation: float = 0.0
     # Multi-camera switch stagger (one of RMS's programmed switch delays).
     capture_wait_seconds: float = 0.0
+    # RTSP transport ("tcp"/"udp"). UDP can overflow the kernel receive buffer
+    # (RcvbufErrors), which we monitor host-wide when any station uses it.
+    protocol: str = "tcp"
 
     @property
     def captured_path(self):
@@ -127,6 +130,8 @@ def _station_from_config(config_path):
     group = (cfg.get("camera_group_name") or "").strip()
     camera_group_name = group if group and group.lower() != "none" else None
 
+    protocol = (cfg.get("protocol") or "tcp").strip().lower()
+
     return Station(
         station_id=station_id,
         config_path=os.path.abspath(config_path),
@@ -148,6 +153,7 @@ def _station_from_config(config_path):
         longitude=longitude,
         elevation=elevation,
         capture_wait_seconds=capture_wait_seconds,
+        protocol=protocol,
     )
 
 

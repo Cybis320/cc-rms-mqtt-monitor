@@ -62,6 +62,11 @@ class Thresholds:
     clock_error_warn_ms: float = 100.0
     # Dropped frames in the last 10 min before warning (a few are normal).
     dropped_frames_warn: int = 10
+    # UDP receive-buffer overflow rate (RcvbufErrors/min, host-wide) before
+    # warning. Only evaluated when a station uses protocol: udp. The raw counter
+    # only grows / resets at boot, so we alert on its growth RATE, not its total.
+    # Tune per host: a quiet host sits near zero; some baseline jitter is normal.
+    udp_rcvbuf_errors_per_min_warn: float = 60.0
     # Host memory headroom (MB) before warning / erroring.
     mem_available_warn_mb: int = 800
     mem_available_error_mb: int = 300
