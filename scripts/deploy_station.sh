@@ -223,7 +223,8 @@ info "Get alerts via Telegram (all platforms, best on iOS) or ntfy (Android/desk
 info "Subscribe to a HANDLE below -- the same string works on both channels:"
 info "  Telegram: message @contrailcast_rms_bot  ->  /subscribe <handle>"
 info "  ntfy:     app server https://ntfy.contrailcast.com  ->  subscribe to <handle>"
-info "            (ntfy iOS push is limited; on iPhone/iPad use Telegram)"
+info "            (NOT for iOS: ntfy iPhone/iPad push is relayed via rate-limited"
+info "             ntfy.sh APNs and can be dropped -- use Telegram on iOS)"
 info "Live dashboard (no app): https://status.contrailcast.com"
 "$PY" -m cc_mqtt_monitor --config "$DEST/config.yaml" --status 2>/dev/null | "$PY" -c '
 import sys, json

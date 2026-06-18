@@ -177,16 +177,18 @@ especially on iPhone/iPad.** Open a chat with the bridge bot
 A prefix token like `USC` auto-covers every current *and future* station with
 that prefix — subscribe once.
 
-**ntfy — great on Android / desktop / web; limited on iOS.** Install the ntfy
-app, point it at the bridge's ntfy server (**`https://ntfy.contrailcast.com`**),
-and add the handle **`<handle>`** as a topic (e.g. `Phoenix-1`, `USC`) — or open
-`https://ntfy.contrailcast.com/<handle>` in a browser. The installer prints your
-host's exact handles at the end of a deploy.
+**ntfy — recommended on Android / desktop / web; NOT recommended on iOS.**
+Install the ntfy app, point it at the bridge's ntfy server
+(**`https://ntfy.contrailcast.com`**), and add the handle **`<handle>`** as a
+topic (e.g. `Phoenix-1`, `USC`) — or open `https://ntfy.contrailcast.com/<handle>`
+in a browser. The installer prints your host's exact handles at the end of a
+deploy.
 
-> **iOS caveat:** ntfy's iPhone/iPad app only receives background push through
-> the public `ntfy.sh` infrastructure — a self-hosted server has to be configured
-> to forward to it (`upstream-base-url`), and delivery is still slower and less
-> reliable than on Android. **On iOS, use Telegram instead.**
+> **Don't use ntfy on iOS — use Telegram.** Apple only allows background push
+> via its APNs service, and a self-hosted ntfy server can't reach APNs directly:
+> iOS pushes are relayed through the public `ntfy.sh` (`upstream-base-url`), which
+> is **rate-limited** (a shared per-server bucket). So on iPhone/iPad ntfy alerts
+> can be throttled, delayed, or dropped. Telegram has no such limit — use it on iOS.
 
 ## Install
 
