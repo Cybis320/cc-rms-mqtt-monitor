@@ -155,6 +155,34 @@ covers each of them.
 The host record carries `groups` + `group_slugs` + `station_ids`, so host-level
 (OOM/memory) alerts fan out to the same group and prefix topics.
 
+### How to receive them (Telegram or ntfy)
+
+Pick a **token** from the table above — your `group_slug`, a single `stationID`,
+or a 3+ char network prefix — then subscribe on either platform:
+
+**Telegram — works on every platform (iOS, Android, desktop). Recommended,
+especially on iPhone/iPad.** Open a chat with the bridge bot
+(**[`@contrailcast_rms_bot`](https://t.me/contrailcast_rms_bot)**) and send:
+
+```
+/subscribe <token>      # e.g.  /subscribe Phoenix-1   or   /subscribe USC
+/list                   # show your subscriptions
+/unsubscribe <token>
+```
+
+A prefix token like `USC` auto-covers every current *and future* station with
+that prefix — subscribe once.
+
+**ntfy — great on Android / desktop / web; limited on iOS.** Install the ntfy
+app, point it at the bridge's ntfy server (**`https://ntfy.contrailcast.com`**), and add the
+topic **`cc-<token>`** (e.g. `cc-Phoenix-1`, `cc-USC`). The installer prints your
+host's exact topics at the end of a deploy.
+
+> **iOS caveat:** ntfy's iPhone/iPad app only receives background push through
+> the public `ntfy.sh` infrastructure — a self-hosted server has to be configured
+> to forward to it (`upstream-base-url`), and delivery is still slower and less
+> reliable than on Android. **On iOS, use Telegram instead.**
+
 ## Install
 
 **One command on an RMS station** (clones, installs into `~/vRMS`, seeds

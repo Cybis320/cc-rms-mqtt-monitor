@@ -219,7 +219,10 @@ fi
 # Print the exact topics to subscribe to, derived from this host's own data.
 # (Topics use the "cc-" prefix per the contrailcast ntfy/Telegram bridge.)
 echo
-info "Subscribe in the ntfy app (your ntfy server) to any of these topics:"
+info "Get alerts via Telegram (all platforms, best on iOS) or ntfy (Android/desktop/web):"
+info "  Telegram: message @contrailcast_rms_bot  ->  /subscribe <token>   (token = a cc- name below, without 'cc-')"
+info "  ntfy:     app server https://ntfy.contrailcast.com  ->  subscribe to the cc- topics below"
+info "            (ntfy iOS push is limited; on iPhone/iPad use Telegram)"
 "$PY" -m cc_mqtt_monitor --config "$DEST/config.yaml" --status 2>/dev/null | "$PY" -c '
 import sys, json
 try:
@@ -237,7 +240,7 @@ print("    a whole network    ->  cc-USC, cc-CAC, cc-USL, cc-USV, ...")
 print("                           any leading prefix of a station ID, 3+ chars.")
 print("                           Subscribe to a network prefix ONCE and every current")
 print("                           AND future station with that prefix is covered")
-print("                           automatically -- no ntfy change when new stations deploy.")
+print("                           automatically -- no app change when new stations deploy.")
 ' || true
 
 # --- 6. publish-consent note -----------------------------------------------
