@@ -128,8 +128,8 @@ def collect_capture(station, now=None):
     fits = glob.glob(os.path.join(latest, _FITS_GLOB))
     result["fits_count"] = len(fits)
     if fits:
-        newest = max(_safe_mtime(f) for f in fits)
-        result["newest_fits_age_s"] = round(now - newest, 1)
+        newest = max(fits)   # latest by name (FF filename carries a sortable timestamp)
+        result["newest_fits_age_s"] = round(now - _safe_mtime(newest), 1)
     return result
 
 
@@ -230,7 +230,7 @@ def collect_timelapse(station, now=None):
     suffix = "_frametimes.json"
     jsons = glob.glob(os.path.join(fp, "*" + suffix))
     if jsons:
-        newest = max(jsons, key=_safe_mtime)
+        newest = max(jsons)   # latest session by name (sortable start/end timestamps)
         result["timelapse_session_age_s"] = round(now - _safe_mtime(newest), 1)
         prefix = os.path.basename(newest)[:-len(suffix)]
         mp4 = os.path.join(fp, prefix + "_frames_timelapse.mp4")
@@ -243,14 +243,14 @@ def collect_timelapse(station, now=None):
     # Newest timelapse mp4 of any session (for the "none being generated" check).
     mp4s = glob.glob(os.path.join(fp, "*_frames_timelapse.mp4"))
     if mp4s:
-        result["newest_timelapse_age_s"] = round(now - max(_safe_mtime(m) for m in mp4s), 1)
+        result["newest_timelapse_age_s"] = round(now - _safe_mtime(max(mp4s)), 1)
 
     # Oldest frame data on disk (FramesFiles/<year>/<date>/...), so a station
     # that has accumulated frames for ages but produced no mp4 is still caught.
     date_dirs = [d for d in glob.glob(os.path.join(fp, "[0-9][0-9][0-9][0-9]", "*"))
                  if os.path.isdir(d)]
     if date_dirs:
-        result["frames_data_age_s"] = round(now - min(_safe_mtime(d) for d in date_dirs), 1)
+        result["frames_data_age_s"] = round(now - _safe_mtime(min(date_dirs)), 1)  # oldest by name
     return result
 
 
@@ -312,7 +312,7 @@ def _newest_log(station):
     logs = glob.glob(pattern) or glob.glob(os.path.join(station.log_path, "*.log"))
     if not logs:
         return None
-    return max(logs, key=_safe_mtime)
+    return max(logs)   # latest log by name (filename carries a sortable timestamp)
 
 
 def _tail(path, max_lines):
@@ -419,7 +419,7 @@ def collect_summary(station):
     if not files:
         return result
 
-    newest = max(files, key=_safe_mtime)
+    newest = max(files)   # latest night by name (the archived-dir path sorts chronologically)
     result["summary_age_s"] = round(time.time() - _safe_mtime(newest), 1)
     try:
         with open(newest) as fh:
