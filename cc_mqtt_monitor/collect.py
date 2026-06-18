@@ -85,18 +85,22 @@ _FITS_GLOB = "FF_*.fits"
 
 
 def _latest_subdir(path):
-    """Return the most-recently-modified immediate subdirectory of path, or None."""
+    """Return the highest-NAMED immediate subdirectory of path, or None.
+
+    RMS names capture/frame directories with zero-padded, sortable timestamps
+    (e.g. US005A_20260618_053104_..., 20260618-169, 20260618-169_05), so the
+    lexicographically-greatest name is the most recent. We deliberately do NOT
+    use mtime: a directory's mtime changes only when an entry is added/removed
+    (not when frames are written into an existing subdir) and is perturbed by
+    timelapse/archiving touching older directories -- both made mtime pick a
+    stale directory and produce false "capture stalled" alerts (notably in the
+    morning at the UTC date rollover)."""
     try:
-        subdirs = [
-            os.path.join(path, name)
-            for name in os.listdir(path)
-            if os.path.isdir(os.path.join(path, name))
-        ]
+        names = [name for name in os.listdir(path)
+                 if os.path.isdir(os.path.join(path, name))]
     except (IOError, OSError):
         return None
-    if not subdirs:
-        return None
-    return max(subdirs, key=lambda d: _safe_mtime(d))
+    return os.path.join(path, max(names)) if names else None
 
 
 def _safe_mtime(path):
@@ -183,7 +187,9 @@ def collect_frames(station, now=None):
     if not images:
         return result
 
-    newest = max(images, key=_safe_mtime)
+    # Newest by NAME (filename carries the UTC timestamp) -- robust like the dir
+    # walk above; age is still measured from the file's mtime (its write time).
+    newest = max(images)
     result["newest_frame_age_s"] = round(now - _safe_mtime(newest), 1)
     base = os.path.splitext(os.path.basename(newest))[0]
     if base.endswith("_d"):
