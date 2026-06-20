@@ -28,6 +28,7 @@ CHECK_KEYS = (
     "timelapse_overdue",  # saving frames but no timelapse mp4 produced in ages
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
     "log_warning",        # WARNING-level lines in the scanned log tail
+    "too_many_stars",     # excessive star candidates while dark (washout / low limit)
     "watchdog",           # RMS WATCHDOG died/stale/Restarting event
     "disk_low",           # data partition low / critically low
     "upload_backlog",     # upload queue length over threshold
@@ -140,6 +141,12 @@ def evaluate(metrics, thresholds, disabled=()):
         last = metrics.get("last_warning") or "see log"
         flag(DEGRADED, "log_warning", "Warning in log (%dx): %s"
              % (metrics["warning_count"], last))
+    if metrics.get("too_many_stars_dark_count", 0) >= thresholds.too_many_stars_warn:
+        flag(DEGRADED, "too_many_stars",
+             "Too many star candidates while dark (%dx, peak %s/%s): sky washed out "
+             "(cloud/moon/light) or star limit too low"
+             % (metrics["too_many_stars_dark_count"],
+                metrics.get("too_many_stars_peak"), metrics.get("too_many_stars_limit")))
     if metrics.get("last_watchdog_event"):
         flag(DEGRADED, "watchdog", "Watchdog intervention: %s" % metrics["last_watchdog_event"])
 

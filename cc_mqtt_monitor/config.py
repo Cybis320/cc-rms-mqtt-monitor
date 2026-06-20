@@ -63,6 +63,10 @@ class Thresholds:
     # WARNING-level log lines in the scanned tail before flagging (degraded).
     # RMS warnings are rare (~a few per multi-hour log), so 1 = alert on any.
     log_warning_warn: int = 1
+    # "Too many candidate stars" events while it should be dark before flagging.
+    # (Daytime/twilight ones are sky washout and never counted.) A few = a
+    # passing cloud; sustained = real washout (moon/cloud/light) or limit too low.
+    too_many_stars_warn: int = 5
     # Dropped frames in the last 10 min before warning (a few are normal).
     dropped_frames_warn: int = 10
     # UDP receive-buffer overflow rate (RcvbufErrors/min, host-wide) to warn

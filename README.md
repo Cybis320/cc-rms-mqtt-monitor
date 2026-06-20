@@ -66,6 +66,7 @@ the human-readable text.
 | `timelapse_overdue` | degraded | saving frames but no `_frames_timelapse.mp4` produced in ages (generation not running at all; latitude-independent) | `timelapse_max_age_s` (30h) |
 | `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault in the log | — |
 | `log_warning` | degraded | actionable `WARNING`-level lines in the log tail (benign ones filtered — see below) | `log_warning_warn` (1 = any) |
+| `too_many_stars` | degraded | ExtractStars `Too many candidate stars` **while it should be dark** (sky washout — moon/cloud/light — or `max_star_candidates` too low); day/twilight ignored | `too_many_stars_warn` (5) |
 | `watchdog` | degraded | RMS `WATCHDOG: died/stale/Restarting` event | — |
 | `disk_low` | degraded / error | data partition free space low / critical | `disk_free_warn_gb` (20) / `disk_free_error_gb` (5) |
 | `upload_backlog` | degraded | upload queue length over threshold | `upload_queue_warn` (50) |
@@ -96,6 +97,13 @@ warnings by default — ExtractStars `Too many candidate stars`, numpy/scipy
 lock race, and `alignPlatepar: Fit did not converge` (self-recovers). Add your
 own patterns with `log_warning_ignore` (regex). Genuinely actionable warnings
 (camera-switch / upload / ffmpeg / reboot failures, …) still alert.
+
+`Too many candidate stars` is doubly handled: silenced as a generic warning
+(it's high-volume and benign by day), but counted by the dedicated
+`too_many_stars` check **only while it should be dark** — day/twilight occurrences
+are sky washout with no signal, whereas night occurrences mean real washout
+(moon/cloud/light dome) or a too-low `max_star_candidates`. "Dark" uses the same
+sun-angle logic as `capture_stalled` (RMS's own night/FF horizon).
 
 ## Health topics
 
