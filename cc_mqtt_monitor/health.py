@@ -28,7 +28,6 @@ CHECK_KEYS = (
     "timelapse_overdue",  # saving frames but no timelapse mp4 produced in ages
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
     "log_warning",        # WARNING-level lines in the scanned log tail
-    "too_many_stars",     # excessive star candidates while dark (washout / low limit)
     "watchdog",           # RMS WATCHDOG died/stale/Restarting event
     "disk_low",           # data partition low / critically low
     "upload_backlog",     # upload queue length over threshold
@@ -141,18 +140,6 @@ def evaluate(metrics, thresholds, disabled=()):
         last = metrics.get("last_warning") or "see log"
         flag(DEGRADED, "log_warning", "Warning in log (%dx): %s"
              % (metrics["warning_count"], last))
-    # Star limit too low: frames skipped while dark AND catalog-matched stars are
-    # near the candidate cap (so real stars, not washout, are tripping it). A low
-    # matched count means the excess candidates are washout/noise -> no alert.
-    limit = metrics.get("too_many_stars_limit")
-    matched = metrics.get("detected_stars_peak")
-    if (metrics.get("too_many_stars_dark_count", 0) >= thresholds.too_many_stars_warn
-            and limit and matched is not None
-            and matched >= thresholds.too_many_stars_match_ratio * limit):
-        flag(DEGRADED, "too_many_stars",
-             "Star limit too low: %d matched stars vs cap %d, skipping %d dark frames "
-             "-- raise max_star_candidates" % (matched, limit,
-                                               metrics["too_many_stars_dark_count"]))
     if metrics.get("last_watchdog_event"):
         flag(DEGRADED, "watchdog", "Watchdog intervention: %s" % metrics["last_watchdog_event"])
 

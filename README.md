@@ -66,7 +66,6 @@ the human-readable text.
 | `timelapse_overdue` | degraded | saving frames but no `_frames_timelapse.mp4` produced in ages (generation not running at all; latitude-independent) | `timelapse_max_age_s` (30h) |
 | `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault in the log | — |
 | `log_warning` | degraded | actionable `WARNING`-level lines in the log tail (benign ones filtered — see below) | `log_warning_warn` (1 = any) |
-| `too_many_stars` | degraded | star-extraction frames skipped **while dark** AND matched stars near the cap — i.e. `max_star_candidates` genuinely too low (washout is excluded by the matched-star test) | `too_many_stars_warn` (5), `..._match_ratio` (0.7) |
 | `watchdog` | degraded | RMS `WATCHDOG: died/stale/Restarting` event | — |
 | `disk_low` | degraded / error | data partition free space low / critical | `disk_free_warn_gb` (20) / `disk_free_error_gb` (5) |
 | `upload_backlog` | degraded | upload queue length over threshold | `upload_queue_warn` (50) |
@@ -98,15 +97,11 @@ lock race, and `alignPlatepar: Fit did not converge` (self-recovers). Add your
 own patterns with `log_warning_ignore` (regex). Genuinely actionable warnings
 (camera-switch / upload / ffmpeg / reboot failures, …) still alert.
 
-`Too many candidate stars` is doubly handled: silenced as a generic warning
-(high-volume, benign by day), and counted by the dedicated `too_many_stars` check
-**only while it should be dark** (sun-angle logic shared with `capture_stalled`).
-But a dark candidate spike alone is ambiguous — it's usually washout (moon /
-cloud / light dome), which you can't fix. To alert **only when the limit is
-genuinely too low**, the check also requires the night's catalog-**matched** star
-count (`Detected stars: N`) to reach `too_many_stars_match_ratio` of the cap:
-real stars filling `max_star_candidates`. When matched stars stay well below the
-cap, the excess candidates are washout/noise and nothing fires.
+> `Too many candidate stars` is in the default ignore list. It fires almost
+> entirely on sky washout (moon / cloud / light dome / daytime), which isn't
+> actionable, and the overflowing frames are *skipped* (logging zero stars) — so
+> the logs can't reliably tell a too-low `max_star_candidates` from washout.
+> Rather than alert misleadingly, it's simply suppressed.
 
 ## Health topics
 
