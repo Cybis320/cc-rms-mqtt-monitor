@@ -75,8 +75,10 @@ thresholds:
   upload_queue_warn: 50
   clock_error_warn_ms: 100
   dropped_frames_warn: 10      # dropped frames per 10 min before warning
-  too_many_stars_warn: 5       # "too many candidate stars" while DARK before
-                               # flagging (washout / max_star_candidates too low);
-                               # daytime/twilight occurrences are never counted
+  too_many_stars_warn: 5       # skipped "too many candidate stars" frames while
+                               # DARK to consider the check (daytime never counts)
+  too_many_stars_match_ratio: 0.7  # ...but only alert if matched stars (Detected
+                               # stars: N) reach this fraction of the cap -- i.e.
+                               # max_star_candidates is genuinely too low, not washout
   mem_available_warn_mb: 800   # host RAM headroom (OOM early warning)
   mem_available_error_mb: 300

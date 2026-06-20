@@ -355,6 +355,10 @@ def _compile_warning_ignore(extra):
 # while it should be dark -- by day/twilight it's just sky washout (no signal);
 # while dark it means clouds/moon/light-dome, or the star limit set too low.
 _TOO_MANY_STARS_RE = re.compile(r"Too many candidate stars to process!\s*(\d+)/(\d+)")
+# Matched (catalog-recognized) stars per frame -- the discriminator between a
+# real dense field (count near the limit -> limit too low) and washout (count
+# well below the limit while candidates spike -> noise/glow, not stars).
+_DETECTED_STARS_RE = re.compile(r"Detected stars:\s*(\d+)")
 # Leading RMS log timestamp, in the host's LOCAL time (same box as the monitor).
 _LOG_TS_RE = re.compile(r"^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})")
 
@@ -436,6 +440,7 @@ def collect_logs(station, max_lines, warning_ignore=None):
         "too_many_stars_dark_count": 0,   # "too many candidate stars" while dark
         "too_many_stars_peak": None,      # worst found count among those
         "too_many_stars_limit": None,     # RMS max_star_candidates
+        "detected_stars_peak": None,      # most catalog-matched stars while dark
         "last_watchdog_event": None,
         "buffer_fill_pct": None,
         "dropped_frames_10min": None,
@@ -449,6 +454,21 @@ def collect_logs(station, max_lines, warning_ignore=None):
     result["log_age_s"] = round(time.time() - _safe_mtime(log_path), 1)
 
     ignore_re = _compile_warning_ignore(warning_ignore)
+
+    # "Dark" = RMS should be collecting FF (night, past the dawn/dusk grace).
+    # Memoized in 10-min buckets so per-line ephem stays cheap over the tail.
+    _dark = {}
+    def is_dark(line):
+        epoch = _log_epoch(line)
+        if epoch is None:
+            return False
+        bucket = int(epoch // 600)
+        cached = _dark.get(bucket)
+        if cached is None:
+            cached = (rmsmode.expected_output(station, epoch) == "ff")
+            _dark[bucket] = cached
+        return cached
+
     lines = _tail(log_path, max_lines)
     for idx, line in enumerate(lines):
         is_fatal = False
@@ -467,17 +487,21 @@ def collect_logs(station, max_lines, warning_ignore=None):
             result["warning_count"] += 1
             result["last_warning"] = line.strip()[:300]
 
-        # "Too many candidate stars" only matters while it should be dark; by
-        # day/twilight it's expected sky washout. Gate on RMS's own night logic.
+        # "Too many candidate stars" + matched-star peak, both only while dark
+        # (by day/twilight a candidate spike is just washout, no signal).
         tm = _TOO_MANY_STARS_RE.search(line)
-        if tm:
-            epoch = _log_epoch(line)
-            if epoch is not None and rmsmode.expected_output(station, epoch) == "ff":
-                found, limit = int(tm.group(1)), int(tm.group(2))
-                result["too_many_stars_dark_count"] += 1
-                result["too_many_stars_limit"] = limit
-                if found > (result["too_many_stars_peak"] or 0):
-                    result["too_many_stars_peak"] = found
+        if tm and is_dark(line):
+            found, limit = int(tm.group(1)), int(tm.group(2))
+            result["too_many_stars_dark_count"] += 1
+            result["too_many_stars_limit"] = limit
+            if found > (result["too_many_stars_peak"] or 0):
+                result["too_many_stars_peak"] = found
+        else:
+            ds = _DETECTED_STARS_RE.search(line)   # only non-skipped frames log this
+            if ds and is_dark(line):
+                n = int(ds.group(1))
+                if n > (result["detected_stars_peak"] or 0):
+                    result["detected_stars_peak"] = n
 
         if _WATCHDOG_RE.search(line):
             result["last_watchdog_event"] = line.strip()[:300]
