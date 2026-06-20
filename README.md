@@ -92,10 +92,10 @@ Tune sensitivity instead with the `thresholds:` block (see `config.example.yaml`
 
 **Benign warnings:** `log_warning` ignores high-volume, non-actionable RMS
 warnings by default — ExtractStars `Too many candidate stars`, numpy/scipy
-`*Warning:` (covariance / empty slice / invalid divide), and the
-observation-summary lock race. Add your own patterns with `log_warning_ignore`
-(regex), e.g. `["alignPlatepar: Fit did not converge"]`. Genuinely actionable
-warnings (camera-switch / upload / ffmpeg / reboot failures, …) still alert.
+`*Warning:` (covariance / empty slice / invalid divide), the observation-summary
+lock race, and `alignPlatepar: Fit did not converge` (self-recovers). Add your
+own patterns with `log_warning_ignore` (regex). Genuinely actionable warnings
+(camera-switch / upload / ffmpeg / reboot failures, …) still alert.
 
 ## Health topics
 

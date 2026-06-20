@@ -57,8 +57,9 @@ disabled_checks: []
 
 # Extra WARNING-level log lines to NOT alert on (regex, matched against the
 # line). Added to the built-in benign defaults: ExtractStars "Too many candidate
-# stars", numpy/scipy *Warning:, and the observation-summary lock race. Example:
-#   log_warning_ignore: ["alignPlatepar: Fit did not converge"]
+# stars", numpy/scipy *Warning:, the observation-summary lock race, and
+# alignPlatepar non-convergence. Example:
+#   log_warning_ignore: ["Local file not found"]
 log_warning_ignore: []
 
 thresholds:

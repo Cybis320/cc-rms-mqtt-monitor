@@ -341,6 +341,7 @@ _DEFAULT_WARNING_IGNORE = [
     r"Too many candidate stars",                               # ExtractStars caps the list
     r"Could not record media_backend in observation summary",  # summary-lock race; capture continues
     r"(?:Runtime|Optimize|User|Deprecation|Future|Pending)Warning:",  # numpy/scipy/py warnings
+    r"alignPlatepar: Fit did not converge",                    # self-recovers to original platepar
 ]
 
 
