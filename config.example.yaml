@@ -50,10 +50,16 @@ group: null
 
 # Health checks to silence (by key), e.g. [dropped_frames, upload_backlog].
 # Empty = all on. Keys: capture_down, capture_stalled, detection_stalled,
-# timelapse_missing, timelapse_overdue, log_fatal, watchdog, disk_low,
-# upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames, oom,
-# host_memory.
+# timelapse_missing, timelapse_overdue, log_fatal, log_warning, watchdog,
+# disk_low, upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames,
+# oom, host_memory, udp_rcvbuf_errors.
 disabled_checks: []
+
+# Extra WARNING-level log lines to NOT alert on (regex, matched against the
+# line). Added to the built-in benign defaults: ExtractStars "Too many candidate
+# stars", numpy/scipy *Warning:, and the observation-summary lock race. Example:
+#   log_warning_ignore: ["alignPlatepar: Fit did not converge"]
+log_warning_ignore: []
 
 thresholds:
   output_fresh_error_s: 300    # error if no output (FF at night / frames by day)

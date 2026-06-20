@@ -51,7 +51,8 @@ def gather(config, maint=None):
     behind = rms_behind(config.rms_dir)      # commits behind upstream (live, no fetch)
     states = []
     for station in stations:
-        metrics = collect_station(station, config.log_tail_lines, now)
+        metrics = collect_station(station, config.log_tail_lines, now,
+                                  config.log_warning_ignore)
         state = build_state(metrics, config.thresholds, config.host_name, _iso(now), disabled)
         group = _station_group(station, config)
         state["group"] = group               # human-readable label

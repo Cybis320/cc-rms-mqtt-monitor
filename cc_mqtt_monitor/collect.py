@@ -333,6 +333,20 @@ _FATAL_PATTERNS = [
 _WATCHDOG_RE = re.compile(r"WATCHDOG:.*(died|stale|Restarting)", re.IGNORECASE)
 # RMS log level field, e.g. "2026/06/20 03:08:33-WARNING-BufferedCapture-line:..".
 _WARNING_RE = re.compile(r"-WARNING-")
+
+# Benign, high-volume RMS warnings ignored by default: computational artifacts
+# or self-recovering races, not operational problems. Operators add more via
+# config `log_warning_ignore` (these defaults always apply).
+_DEFAULT_WARNING_IGNORE = [
+    r"Too many candidate stars",                               # ExtractStars caps the list
+    r"Could not record media_backend in observation summary",  # summary-lock race; capture continues
+    r"(?:Runtime|Optimize|User|Deprecation|Future|Pending)Warning:",  # numpy/scipy/py warnings
+]
+
+
+def _compile_warning_ignore(extra):
+    pats = _DEFAULT_WARNING_IGNORE + list(extra or [])
+    return re.compile("|".join("(?:%s)" % p for p in pats))
 # "Buffer fill: 12.3%, Dropped frames: 4 (last 10 min), 9 this session"
 _BUFFER_RE = re.compile(
     r"Buffer fill:\s*([\d.]+)%.*Dropped frames:\s*(\d+).*?(\d+)\s+this session",
@@ -388,8 +402,9 @@ def _extract_traceback(lines, idx):
     return lines[idx].strip()
 
 
-def collect_logs(station, max_lines):
-    """Scan the newest log for fatal errors, watchdog events, and buffer stats."""
+def collect_logs(station, max_lines, warning_ignore=None):
+    """Scan the newest log for fatal errors, watchdog events, and buffer stats.
+    `warning_ignore` adds patterns to the built-in benign-warning filter."""
     result = {
         "log_file": None,
         "log_age_s": None,
@@ -409,6 +424,7 @@ def collect_logs(station, max_lines):
     result["log_file"] = os.path.basename(log_path)
     result["log_age_s"] = round(time.time() - _safe_mtime(log_path), 1)
 
+    ignore_re = _compile_warning_ignore(warning_ignore)
     lines = _tail(log_path, max_lines)
     for idx, line in enumerate(lines):
         is_fatal = False
@@ -422,7 +438,8 @@ def collect_logs(station, max_lines):
                     result["last_error"] = line.strip()[:300]
                 break
 
-        if not is_fatal and _WARNING_RE.search(line):   # WARNING-level (non-fatal) lines
+        # WARNING-level lines that are neither fatal nor a known-benign pattern.
+        if not is_fatal and _WARNING_RE.search(line) and not ignore_re.search(line):
             result["warning_count"] += 1
             result["last_warning"] = line.strip()[:300]
 
@@ -625,7 +642,7 @@ def collect_mode(station, now=None):
     return result
 
 
-def collect_station(station, max_log_lines, now=None):
+def collect_station(station, max_log_lines, now=None, warning_ignore=None):
     """Run every collector and merge into one flat metrics dict."""
     now = now or time.time()
     metrics = {"station_id": station.station_id}
@@ -635,7 +652,7 @@ def collect_station(station, max_log_lines, now=None):
     metrics.update(collect_frames(station, now))
     metrics.update(collect_timelapse(station, now))
     metrics.update(collect_detection(station, now))
-    metrics.update(collect_logs(station, max_log_lines))
+    metrics.update(collect_logs(station, max_log_lines, warning_ignore))
     metrics.update(collect_summary(station))
     metrics.update(collect_upload(station, now))
     metrics.update(collect_disk(station))

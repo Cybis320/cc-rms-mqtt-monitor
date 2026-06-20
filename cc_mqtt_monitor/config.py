@@ -118,6 +118,11 @@ class Config:
     # Health checks to silence, by key (see health.CHECK_KEYS). Empty = all on.
     disabled_checks: list = field(default_factory=list)
 
+    # Extra regex patterns of WARNING-level log lines to NOT alert on, added to
+    # the built-in benign defaults (ExtractStars star-cap, numpy/scipy warnings,
+    # observation-summary lock race). See collect._DEFAULT_WARNING_IGNORE.
+    log_warning_ignore: list = field(default_factory=list)
+
     def __post_init__(self):
         if not self.host_name:
             self.host_name = socket.gethostname()
