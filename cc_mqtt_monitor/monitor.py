@@ -32,12 +32,25 @@ def _station_group(station, config):
     return config.group or station.camera_group_name
 
 
+# RMS ships .config with this placeholder stationID; a station still on it is
+# unconfigured (and would collide across every fresh box), so we never publish
+# it. It's excluded from transmission AND tombstoned like an opt-out.
+_DEFAULT_STATION_IDS = {"XX0001"}
+
+
+def _publishable(station):
+    """True if this station should be transmitted: the operator consents (RMS
+    weblog_enable) AND it has a real stationID (not the default placeholder)."""
+    return (station.weblog_enable
+            and (station.station_id or "").upper() not in _DEFAULT_STATION_IDS)
+
+
 def _consenting_stations(config):
-    """Stations the operator allows to be published (RMS weblog_enable). A
-    station with weblog_enable=false is never published to MQTT, and is also
-    excluded from the host record's station_ids/groups, so it doesn't leak."""
+    """Stations we publish: operator consent (weblog_enable) and a real stationID.
+    A non-publishable station is never sent to MQTT and is excluded from the host
+    record's station_ids/groups, so it doesn't leak."""
     return [s for s in discover_stations(config.stations_dir, config.rms_dir)
-            if s.weblog_enable]
+            if _publishable(s)]
 
 
 def gather(config, maint=None):
@@ -216,8 +229,8 @@ def run_loop(config, publisher):
         while True:
             start = time.time()
             stations = discover_stations(config.stations_dir, config.rms_dir)
-            consenting = [s for s in stations if s.weblog_enable]
-            opted_out = [s.station_id for s in stations if not s.weblog_enable]
+            consenting = [s for s in stations if _publishable(s)]
+            opted_out = [s.station_id for s in stations if not _publishable(s)]
 
             if consenting:
                 if not connected:
