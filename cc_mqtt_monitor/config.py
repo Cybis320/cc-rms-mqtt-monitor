@@ -60,6 +60,9 @@ class Thresholds:
     disk_free_error_gb: float = 5.0
     upload_queue_warn: int = 50
     clock_error_warn_ms: float = 100.0
+    # WARNING-level log lines in the scanned tail before flagging (degraded).
+    # RMS warnings are rare (~a few per multi-hour log), so 1 = alert on any.
+    log_warning_warn: int = 1
     # Dropped frames in the last 10 min before warning (a few are normal).
     dropped_frames_warn: int = 10
     # UDP receive-buffer overflow rate (RcvbufErrors/min, host-wide) to warn

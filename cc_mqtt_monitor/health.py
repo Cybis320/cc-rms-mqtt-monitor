@@ -27,6 +27,7 @@ CHECK_KEYS = (
     "timelapse_missing",  # a finished frame session's ffmpeg failed (no mp4)
     "timelapse_overdue",  # saving frames but no timelapse mp4 produced in ages
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
+    "log_warning",        # WARNING-level lines in the scanned log tail
     "watchdog",           # RMS WATCHDOG died/stale/Restarting event
     "disk_low",           # data partition low / critically low
     "upload_backlog",     # upload queue length over threshold
@@ -135,6 +136,10 @@ def evaluate(metrics, thresholds, disabled=()):
         last = metrics.get("last_error") or "see log"
         flag(ERROR, "log_fatal", "Fatal error in log (%dx): %s"
              % (metrics["fatal_error_count"], last))
+    if metrics.get("warning_count", 0) >= thresholds.log_warning_warn:
+        last = metrics.get("last_warning") or "see log"
+        flag(DEGRADED, "log_warning", "Warning in log (%dx): %s"
+             % (metrics["warning_count"], last))
     if metrics.get("last_watchdog_event"):
         flag(DEGRADED, "watchdog", "Watchdog intervention: %s" % metrics["last_watchdog_event"])
 

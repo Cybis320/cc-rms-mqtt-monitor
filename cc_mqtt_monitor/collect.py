@@ -331,6 +331,8 @@ _FATAL_PATTERNS = [
 ]
 
 _WATCHDOG_RE = re.compile(r"WATCHDOG:.*(died|stale|Restarting)", re.IGNORECASE)
+# RMS log level field, e.g. "2026/06/20 03:08:33-WARNING-BufferedCapture-line:..".
+_WARNING_RE = re.compile(r"-WARNING-")
 # "Buffer fill: 12.3%, Dropped frames: 4 (last 10 min), 9 this session"
 _BUFFER_RE = re.compile(
     r"Buffer fill:\s*([\d.]+)%.*Dropped frames:\s*(\d+).*?(\d+)\s+this session",
@@ -393,6 +395,8 @@ def collect_logs(station, max_lines):
         "log_age_s": None,
         "fatal_error_count": 0,
         "last_error": None,
+        "warning_count": 0,
+        "last_warning": None,
         "last_watchdog_event": None,
         "buffer_fill_pct": None,
         "dropped_frames_10min": None,
@@ -407,14 +411,20 @@ def collect_logs(station, max_lines):
 
     lines = _tail(log_path, max_lines)
     for idx, line in enumerate(lines):
+        is_fatal = False
         for pattern in _FATAL_PATTERNS:
             if pattern.search(line):
+                is_fatal = True
                 result["fatal_error_count"] += 1
                 if "Traceback" in line:
                     result["last_error"] = _extract_traceback(lines, idx)
                 else:
                     result["last_error"] = line.strip()[:300]
                 break
+
+        if not is_fatal and _WARNING_RE.search(line):   # WARNING-level (non-fatal) lines
+            result["warning_count"] += 1
+            result["last_warning"] = line.strip()[:300]
 
         if _WATCHDOG_RE.search(line):
             result["last_watchdog_event"] = line.strip()[:300]

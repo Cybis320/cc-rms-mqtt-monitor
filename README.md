@@ -65,6 +65,7 @@ the human-readable text.
 | `timelapse_missing` | degraded | a completed frame session's ffmpeg failed — its `_frametimes.json` exists but no `_frames_timelapse.mp4` | `timelapse_grace_s` (1h) |
 | `timelapse_overdue` | degraded | saving frames but no `_frames_timelapse.mp4` produced in ages (generation not running at all; latitude-independent) | `timelapse_max_age_s` (30h) |
 | `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault in the log | — |
+| `log_warning` | degraded | `WARNING`-level lines in the scanned log tail (RMS warnings are rare) | `log_warning_warn` (1 = any) |
 | `watchdog` | degraded | RMS `WATCHDOG: died/stale/Restarting` event | — |
 | `disk_low` | degraded / error | data partition free space low / critical | `disk_free_warn_gb` (20) / `disk_free_error_gb` (5) |
 | `upload_backlog` | degraded | upload queue length over threshold | `upload_queue_warn` (50) |
@@ -73,6 +74,7 @@ the human-readable text.
 | `dropped_frames` | degraded | dropped frames in the last 10 min | `dropped_frames_warn` (10) |
 | `oom` | error (python victim) / degraded | host OOM-killer fired (kernel log) | — |
 | `host_memory` | degraded / error | host available memory low / critical | `mem_available_warn_mb` (800) / `..._error_mb` (300) |
+| `udp_rcvbuf_errors` | degraded | host UDP RcvbufErrors growth rate (only when a station uses `protocol: udp`) | `udp_rcvbuf_errors_per_min_warn` (0 = any increase) |
 
 Day/night for `capture_stalled` comes from the sun (matching RMS's own switch
 horizon + programmed delays), not from frame creation. Conditional checks stay
