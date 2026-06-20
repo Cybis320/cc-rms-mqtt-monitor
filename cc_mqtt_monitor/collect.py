@@ -66,13 +66,13 @@ def _process_config_path(pid, args):
             cfg = a.split("=", 1)[1]
             break
     if cfg and os.path.isabs(cfg):
-        return os.path.abspath(cfg)
+        return os.path.realpath(cfg)
     # No -c, or a relative -c: resolve against the process's working directory.
     try:
         cwd = os.readlink("/proc/%d/cwd" % pid)
     except OSError:
         return None
-    return os.path.abspath(os.path.join(cwd, cfg or ".config"))
+    return os.path.realpath(os.path.join(cwd, cfg or ".config"))
 
 
 def collect_process(station):
@@ -80,10 +80,12 @@ def collect_process(station):
 
     A StartCapture process is matched to its station by the .config it actually
     uses -- the ``-c`` argument (multicam) or its working-directory default
-    ``.config`` (single-cam, launched with no ``-c``). The "main" process is the
-    matching PID whose parent is not itself a matching PID.
+    ``.config`` (single-cam, launched with no ``-c``). Paths are canonicalized
+    with realpath, so a symlinked station .config still matches the process even
+    when RMS was launched via the symlink's target (or vice versa). The "main"
+    process is the matching PID whose parent is not itself a matching PID.
     """
-    target = os.path.abspath(station.config_path)
+    target = os.path.realpath(station.config_path)
     matches = []  # (pid, ppid, vmrss_kb)
     for pid, args, ppid, vmrss_kb in _iter_proc():
         if not any(_STARTCAPTURE_MARKER in a for a in args):
