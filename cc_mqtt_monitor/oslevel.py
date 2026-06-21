@@ -258,7 +258,49 @@ def collect_cpu_pressure():
 _NIC_LAST = {}   # previous summed NIC error counters + monotonic time
 
 
-def read_nic_stats():
+def iface_for_ip(ip):
+    """Egress interface for a dotted-IPv4 address, via /proc/net/route (no deps).
+
+    Used to scope NIC-error monitoring to the camera-facing interface(s): on a
+    box with a dedicated camera subnet (cams on eno1, internet on wifi) this
+    keeps an unrelated internet-NIC glitch from being attributed to camera
+    capture; on a shared single-NIC host it simply resolves to that one NIC.
+    Returns the interface name, or None for a hostname / unresolvable / no-route
+    (caller then falls back to summing all interfaces)."""
+    parts = (ip or "").split(".")
+    if len(parts) != 4:
+        return None   # not dotted IPv4 (e.g. a hostname) -> let caller fall back
+    try:
+        o = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if any(b < 0 or b > 255 for b in o):
+        return None
+    # /proc/net/route stores Destination/Mask as little-endian hex of the 4
+    # bytes, so encode the IP the same way and match by longest prefix (the
+    # contiguous netmask's LE-int magnitude increases with prefix length).
+    ip_le = o[0] | o[1] << 8 | o[2] << 16 | o[3] << 24
+    best, best_mask = None, -1
+    try:
+        with open("/proc/net/route") as fh:
+            next(fh)   # header
+            for line in fh:
+                fields = line.split()
+                if len(fields) < 8:
+                    continue
+                try:
+                    dest = int(fields[1], 16)
+                    mask = int(fields[7], 16)
+                except ValueError:
+                    continue
+                if (ip_le & mask) == dest and mask > best_mask:
+                    best, best_mask = fields[0], mask
+    except (IOError, OSError, StopIteration):
+        return None
+    return best
+
+
+def read_nic_stats(interfaces=None):
     """Summed genuine NIC error counters across real interfaces (/proc/net/dev).
 
     Counts only HARDWARE/link errors -- RX errs+fifo+frame, TX errs+carrier --
@@ -267,8 +309,12 @@ def read_nic_stats():
     dominated by benign unwanted multicast/broadcast the host discards (mDNS,
     SSDP/ONVIF discovery, IGMP) and by qdisc drops, which climb steadily on a
     healthy host and would false-alarm. rx_dropped is returned separately as
-    information (not alerted). 'lo' and virtual interfaces are skipped. Returns
-    (rx_err, rx_dropped, tx_err), or (None, None, None) if unreadable."""
+    information (not alerted).
+
+    `interfaces`, when given, restricts the sum to that set of interface names
+    (the camera-facing NICs) so an unrelated internet/wifi NIC doesn't pollute
+    the signal; when None, all real interfaces are summed ('lo' and virtual ones
+    skipped). Returns (rx_err, rx_dropped, tx_err), or (None,)*3 if unreadable."""
     try:
         with open("/proc/net/dev") as fh:
             lines = fh.readlines()[2:]   # skip the two header rows
@@ -278,7 +324,12 @@ def read_nic_stats():
     for line in lines:
         name, _, rest = line.partition(":")
         name = name.strip()
-        if not rest or name == "lo" or name.startswith(("veth", "docker", "br-")):
+        if not rest:
+            continue
+        if interfaces is not None:
+            if name not in interfaces:
+                continue
+        elif name == "lo" or name.startswith(("veth", "docker", "br-")):
             continue
         f = rest.split()
         if len(f) < 12:
@@ -294,15 +345,18 @@ def read_nic_stats():
     return rx_err, rx_drop, tx_err
 
 
-def collect_nic_errors():
+def collect_nic_errors(interfaces=None):
     """Host NIC RX/TX error totals plus an RX-error growth RATE (per min).
 
     Like the UDP counter, the alertable signal is the rate: a climbing RX error
     count during dropped frames implicates the wire/NIC, whereas a flat count
-    (with drops still happening) clears the NIC and points downstream."""
-    rx_err, rx_drop, tx_err = read_nic_stats()
+    (with drops still happening) clears the NIC and points downstream.
+    `interfaces` scopes the counters to the camera-facing NIC(s) (see
+    read_nic_stats); the watched set is reported as `nic_cam_interfaces`."""
+    rx_err, rx_drop, tx_err = read_nic_stats(interfaces)
     result = {"nic_rx_errors": rx_err, "nic_tx_errors": tx_err,
               "nic_rx_dropped": rx_drop,      # info only (benign multicast) -- not alerted
+              "nic_cam_interfaces": sorted(interfaces) if interfaces else None,
               "nic_rx_errors_per_min": None}
     if rx_err is None:
         return result
@@ -361,18 +415,19 @@ def collect_ip_reasm():
     return result
 
 
-def collect_host(scan_oom_events=True, udp=False):
+def collect_host(scan_oom_events=True, udp=False, cam_interfaces=None):
     """Host-wide metrics dict. `udp=True` adds UDP RcvbufErrors + IP reassembly
     stats (only worth collecting when a station uses protocol: udp). CPU/I-O
     pressure and NIC errors are always collected -- they're cheap and apply to
-    every dropped-frame attribution regardless of transport."""
+    every dropped-frame attribution regardless of transport. `cam_interfaces`
+    scopes NIC-error counters to the camera-facing NIC(s); None sums all."""
     metrics = read_meminfo()
     metrics.update(read_psi_memory())
     if scan_oom_events:
         metrics.update(scan_oom())
     metrics["uptime_s"] = _uptime()
     metrics.update(collect_cpu_pressure())
-    metrics.update(collect_nic_errors())
+    metrics.update(collect_nic_errors(cam_interfaces))
     if udp:
         metrics.update(collect_udp_errors())
         metrics.update(collect_ip_reasm())

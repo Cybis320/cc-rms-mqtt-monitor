@@ -45,7 +45,7 @@ In addition to per-station health, each cycle publishes one **host** record:
 | **OOM-killer events** | scans the kernel log (`journalctl -k` → `dmesg` → log files) for `Out of memory: Killed process` / `oom-kill:`, reports the count and last victim. A killed `python` (RMS) process is an `error`. |
 | **Memory pressure (PSI)** | `full`/`some` stall % from `/proc/pressure/memory` — the actual pre-OOM signal (the kernel kills on reclaim failure, not a fixed free-MB line). Scale-independent, so it works on a 2 GB Pi and a 32 GB box with no per-host tuning. `MemAvailable`/`SwapFree` are still reported for context. |
 | **CPU / I-O pressure** | busy% and **iowait%** (`/proc/stat` delta) + 1-min **load-per-core** (`/proc/loadavg`) — the host-side back-pressure that makes capture drop frames |
-| **NIC errors / IP reassembly** | RX **hardware-error** growth (errs+fifo+frame, *not* `rx_dropped` — that's benign discarded multicast) from `/proc/net/dev`, and `Ip.ReasmFails` from `/proc/net/snmp` (UDP only) — packet loss on the wire / from fragmentation, counted in neither `RcvbufErrors` nor the socket. `rx_dropped` is still reported for context. |
+| **NIC errors / IP reassembly** | RX **hardware-error** growth (errs+fifo+frame, *not* `rx_dropped` — that's benign discarded multicast) from `/proc/net/dev`, **scoped to the camera-facing interface(s)** (resolved per camera IP via `/proc/net/route`, so an internet/wifi NIC on a dedicated-cam-subnet box is ignored; a shared single-NIC host resolves to that one NIC), plus `Ip.ReasmFails` from `/proc/net/snmp` (UDP only). `rx_dropped` and the watched `nic_cam_interfaces` are reported for context. |
 | **Uptime** | host uptime |
 
 The agent **protects itself from the OOM-killer** so it survives to report the
@@ -79,7 +79,7 @@ the human-readable text.
 | `oom` | error (python victim) / degraded | host OOM-killer fired (kernel log) | — |
 | `mem_pressure` | degraded / error | host memory **pressure** (PSI) — `full avg10` spiking / sustained `full avg60` high (pre-OOM, scale-independent) | `mem_psi_full_avg10_warn` (10) / `mem_psi_full_avg60_error` (10) |
 | `udp_rcvbuf_errors` | degraded | host UDP RcvbufErrors growth rate (only when a station uses `protocol: udp`) | `udp_rcvbuf_errors_per_min_warn` (0 = any increase) |
-| `nic_errors` | degraded | host NIC RX error growth (wire/cable/duplex/port) | `nic_rx_errors_per_min_warn` (0 = any increase) |
+| `nic_errors` | degraded | camera-facing NIC RX **hardware**-error growth (wire/cable/duplex/port; excludes benign `rx_dropped`) | `nic_rx_errors_per_min_warn` (0 = any increase) |
 | `cpu_pressure` | degraded | host CPU saturated or high I/O wait (back-pressure) | `cpu_busy_warn_pct` (90) / `cpu_iowait_warn_pct` (20) |
 
 Day/night for `capture_stalled` comes from the sun (matching RMS's own switch

@@ -6,7 +6,7 @@ import logging
 
 from .discovery import discover_stations
 from .collect import collect_station, rms_branch, rms_behind
-from .oslevel import collect_host
+from .oslevel import collect_host, iface_for_ip
 from .health import build_state, build_host_state
 from . import maintenance
 from . import diagnose
@@ -107,7 +107,12 @@ def gather_host(config, maint=None):
     disabled = set(config.disabled_checks or [])
     # UDP RcvbufErrors are host-wide; collect them when any station uses UDP RTSP.
     udp = any(s.protocol == "udp" for s in stations)
-    metrics = collect_host(udp=udp)
+    # Scope NIC-error counters to the camera-facing interface(s): on a box with a
+    # dedicated camera subnet this excludes the internet/wifi NIC; on a shared-NIC
+    # host it resolves to that one NIC. Hostnames / unresolvable -> None => all NICs.
+    cam_ifaces = {ifc for ifc in (iface_for_ip(s.camera_host) for s in stations
+                                  if s.camera_host) if ifc}
+    metrics = collect_host(udp=udp, cam_interfaces=(cam_ifaces or None))
     state = build_host_state(metrics, config.thresholds, config.host_name,
                              _iso(time.time()), disabled)
     # A host can span several groups; list the distinct ones plus its stations,
