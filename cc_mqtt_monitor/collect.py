@@ -444,6 +444,8 @@ _DEFAULT_WARNING_IGNORE = [
     r"Could not record media_backend in observation summary",  # summary-lock race; capture continues
     r"(?:Runtime|Optimize|User|Deprecation|Future|Pending)Warning:",  # numpy/scipy/py warnings
     r"alignPlatepar: Fit did not converge",                    # self-recovers to original platepar
+    r"Dropped frames timestamp queue exceeded safety limit",   # RMS memory-cap housekeeping;
+    # the actual dropping is already covered by the dropped_frames check + drop_cause
 ]
 
 
