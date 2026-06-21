@@ -11,6 +11,8 @@ import re
 import time
 import subprocess
 
+from .sanitize import redact
+
 # OOM-killer signatures, e.g.:
 #   "Out of memory: Killed process 12345 (python) total-vm:..."
 #   "oom-kill:constraint=...,task=python,pid=12345,..."
@@ -116,7 +118,8 @@ def scan_oom(max_lines=1500):
             # group(2) is comm for "Killed process", group(1) is task for oom-kill:
             victim = m.group(2) if _OOM_KILLED_RE.search(line) else m.group(1)
             result["last_oom_victim"] = victim
-            result["last_oom_line"] = line.strip()[:300]
+            # Published to the public feed -> redact IPs/paths from the raw line.
+            result["last_oom_line"] = redact(line.strip())[:300]
     return result
 
 

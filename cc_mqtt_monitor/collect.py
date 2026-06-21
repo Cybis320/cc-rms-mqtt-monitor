@@ -15,6 +15,7 @@ import subprocess
 import time
 
 from .solar import solar_elevation_deg
+from .sanitize import redact
 from . import rmsmode
 
 # ---------------------------------------------------------------------------
@@ -549,19 +550,21 @@ def collect_logs(station, max_lines, warning_ignore=None):
             if pattern.search(line):
                 is_fatal = True
                 result["fatal_error_count"] += 1
+                # Redact before storing: these fields are published to a public
+                # feed and raw RMS lines can carry IPs / device-URL credentials.
                 if "Traceback" in line:
-                    result["last_error"] = _extract_traceback(lines, idx)
+                    result["last_error"] = redact(_extract_traceback(lines, idx))
                 else:
-                    result["last_error"] = line.strip()[:300]
+                    result["last_error"] = redact(line.strip())[:300]
                 break
 
         # WARNING-level lines that are neither fatal nor a known-benign pattern.
         if not is_fatal and _WARNING_RE.search(line) and not ignore_re.search(line):
             result["warning_count"] += 1
-            result["last_warning"] = line.strip()[:300]
+            result["last_warning"] = redact(line.strip())[:300]
 
         if _WATCHDOG_RE.search(line):
-            result["last_watchdog_event"] = line.strip()[:300]
+            result["last_watchdog_event"] = redact(line.strip())[:300]
 
         buf = _BUFFER_RE.search(line)
         if buf:
