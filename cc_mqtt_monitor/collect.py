@@ -446,6 +446,8 @@ _DEFAULT_WARNING_IGNORE = [
     r"alignPlatepar: Fit did not converge",                    # self-recovers to original platepar
     r"Dropped frames timestamp queue exceeded safety limit",   # RMS memory-cap housekeeping;
     # the actual dropping is already covered by the dropped_frames check + drop_cause
+    r"Fewer than \d+ images found, cannot create timelapse",   # tiny day/night-transition
+    # session: RMS returns before writing any json/mp4, so timelapse_missing won't fire either
 ]
 
 
