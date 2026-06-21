@@ -68,7 +68,7 @@ the human-readable text.
 | `log_warning` | degraded | actionable `WARNING`-level lines in the log tail (benign ones filtered — see below) | `log_warning_warn` (1 = any) |
 | `watchdog` | degraded | RMS `WATCHDOG: died/stale/Restarting` event | — |
 | `disk_low` | degraded / error | data partition free space low / critical | `disk_free_warn_gb` (20) / `disk_free_error_gb` (5) |
-| `upload_backlog` | degraded | upload queue length over threshold | `upload_queue_warn` (50) |
+| `upload_backlog` | degraded | upload queue length over threshold (normally drains to 0 each morning; ~4/night when stuck) | `upload_queue_warn` (10) |
 | `clock_unsynced` | degraded | last summary reported clock not synchronized | — |
 | `clock_uncertainty` | degraded | last summary clock error over threshold | `clock_error_warn_ms` (100) |
 | `dropped_frames` | degraded | dropped frames in the last 10 min | `dropped_frames_warn` (10) |

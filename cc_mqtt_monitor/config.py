@@ -58,7 +58,10 @@ class Thresholds:
     timelapse_max_age_s: int = 108000   # 30 h
     disk_free_warn_gb: float = 20.0
     disk_free_error_gb: float = 5.0
-    upload_queue_warn: int = 50
+    # RMS queues ~4 archives per camera per night and drains them same-morning,
+    # so the queue is normally 0. Backlog grows ~4/night when uploads fail; 10
+    # catches that within ~2 nights while clearing the normal morning transient.
+    upload_queue_warn: int = 10
     clock_error_warn_ms: float = 100.0
     # WARNING-level log lines in the scanned tail before flagging (degraded).
     # RMS warnings are rare (~a few per multi-hour log), so 1 = alert on any.

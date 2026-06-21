@@ -72,7 +72,8 @@ thresholds:
   timelapse_max_age_s: 108000  # 30h; flag if no mp4 at all while saving frames
   disk_free_warn_gb: 20
   disk_free_error_gb: 5
-  upload_queue_warn: 50
+  upload_queue_warn: 10        # queue is normally 0 (drains each morning);
+                               # ~4 files/camera/night accumulate when uploads fail
   clock_error_warn_ms: 100
   dropped_frames_warn: 10      # dropped frames per 10 min before warning
   mem_available_warn_mb: 800   # host RAM headroom (OOM early warning)
