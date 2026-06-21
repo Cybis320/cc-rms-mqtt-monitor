@@ -259,19 +259,22 @@ _NIC_LAST = {}   # previous summed NIC error counters + monotonic time
 
 
 def read_nic_stats():
-    """Summed RX/TX error+drop counters across real interfaces (/proc/net/dev).
+    """Summed genuine NIC error counters across real interfaces (/proc/net/dev).
 
-    RX errs/drop/fifo/frame is what the NIC itself shed; a non-zero, climbing
-    value points at the physical link (bad cable, duplex mismatch, dying port)
-    -- distinct from a full socket buffer (RcvbufErrors) or in-pipeline loss.
-    'lo' and virtual/down interfaces are skipped. Returns summed (rx_err, tx_err)
-    or (None, None) if /proc/net/dev can't be read."""
+    Counts only HARDWARE/link errors -- RX errs+fifo+frame, TX errs+carrier --
+    which point at the physical link (bad cable, duplex mismatch, dying port,
+    NIC overrun). It deliberately EXCLUDES rx_dropped / tx_dropped: those are
+    dominated by benign unwanted multicast/broadcast the host discards (mDNS,
+    SSDP/ONVIF discovery, IGMP) and by qdisc drops, which climb steadily on a
+    healthy host and would false-alarm. rx_dropped is returned separately as
+    information (not alerted). 'lo' and virtual interfaces are skipped. Returns
+    (rx_err, rx_dropped, tx_err), or (None, None, None) if unreadable."""
     try:
         with open("/proc/net/dev") as fh:
             lines = fh.readlines()[2:]   # skip the two header rows
     except (IOError, OSError):
-        return None, None
-    rx_err = tx_err = 0
+        return None, None, None
+    rx_err = rx_drop = tx_err = 0
     for line in lines:
         name, _, rest = line.partition(":")
         name = name.strip()
@@ -281,11 +284,14 @@ def read_nic_stats():
         if len(f) < 12:
             continue
         try:
-            rx_err += int(f[2]) + int(f[3]) + int(f[4]) + int(f[5])  # errs drop fifo frame
-            tx_err += int(f[10]) + int(f[11])                        # errs drop
+            # RX: bytes packets errs drop fifo frame ... | TX: bytes packets errs
+            # drop fifo colls carrier compressed
+            rx_err += int(f[2]) + int(f[4]) + int(f[5])   # errs + fifo + frame
+            rx_drop += int(f[3])                          # dropped (benign here)
+            tx_err += int(f[10]) + (int(f[14]) if len(f) > 14 else 0)  # errs + carrier
         except (ValueError, IndexError):
             continue
-    return rx_err, tx_err
+    return rx_err, rx_drop, tx_err
 
 
 def collect_nic_errors():
@@ -294,8 +300,9 @@ def collect_nic_errors():
     Like the UDP counter, the alertable signal is the rate: a climbing RX error
     count during dropped frames implicates the wire/NIC, whereas a flat count
     (with drops still happening) clears the NIC and points downstream."""
-    rx_err, tx_err = read_nic_stats()
+    rx_err, rx_drop, tx_err = read_nic_stats()
     result = {"nic_rx_errors": rx_err, "nic_tx_errors": tx_err,
+              "nic_rx_dropped": rx_drop,      # info only (benign multicast) -- not alerted
               "nic_rx_errors_per_min": None}
     if rx_err is None:
         return result

@@ -45,7 +45,7 @@ In addition to per-station health, each cycle publishes one **host** record:
 | **OOM-killer events** | scans the kernel log (`journalctl -k` → `dmesg` → log files) for `Out of memory: Killed process` / `oom-kill:`, reports the count and last victim. A killed `python` (RMS) process is an `error`. |
 | **Memory pressure (PSI)** | `full`/`some` stall % from `/proc/pressure/memory` — the actual pre-OOM signal (the kernel kills on reclaim failure, not a fixed free-MB line). Scale-independent, so it works on a 2 GB Pi and a 32 GB box with no per-host tuning. `MemAvailable`/`SwapFree` are still reported for context. |
 | **CPU / I-O pressure** | busy% and **iowait%** (`/proc/stat` delta) + 1-min **load-per-core** (`/proc/loadavg`) — the host-side back-pressure that makes capture drop frames |
-| **NIC errors / IP reassembly** | RX error+drop growth from `/proc/net/dev`, and `Ip.ReasmFails` from `/proc/net/snmp` (UDP only) — packet loss on the wire / from fragmentation, counted in neither `RcvbufErrors` nor the socket |
+| **NIC errors / IP reassembly** | RX **hardware-error** growth (errs+fifo+frame, *not* `rx_dropped` — that's benign discarded multicast) from `/proc/net/dev`, and `Ip.ReasmFails` from `/proc/net/snmp` (UDP only) — packet loss on the wire / from fragmentation, counted in neither `RcvbufErrors` nor the socket. `rx_dropped` is still reported for context. |
 | **Uptime** | host uptime |
 
 The agent **protects itself from the OOM-killer** so it survives to report the
