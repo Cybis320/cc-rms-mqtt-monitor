@@ -97,11 +97,12 @@ thresholds:
   # --- Dropped-frame attribution (classify_drops) + adaptive probe ---
   # These tune which cause a drop is pinned on, and whether it's host-explained
   # (no probe) or worth escalating. They don't change alert SEVERITY.
-  buffer_fill_warn_pct: 70       # appsink this full => RMS consumer back-pressure
-  capture_cpu_warn_pct: 250      # capture process-tree CPU% (sums across cores)
-  cpu_busy_warn_pct: 90          # host CPU saturated (back-pressure)
-  cpu_iowait_warn_pct: 20        # host blocked on disk I/O (write back-pressure)
-  load_per_core_warn: 2.0        # run-queue >> cores
+  buffer_fill_spike_pct: 30      # peak appsink fill (recent window) => the drop's
+                                 # back-pressure tell; the fill at the drop line
+                                 # has usually recovered. CPU% is NOT a trigger
+                                 # (a busy Pi runs hot regardless) -- the spike is.
+  cpu_busy_warn_pct: 90          # host CPU saturated (host cpu_pressure check + context)
+  cpu_iowait_warn_pct: 20        # host blocked on disk I/O (context: cpu vs disk)
   nic_rx_errors_per_min_warn: 0  # NIC RX errors climbing => wire/cable/duplex
   ip_reasm_fails_per_min_warn: 0 # IP fragment-reassembly drops climbing
   decoder_errors_warn: 1         # in-log decoder/concealment errors (upstream loss)

@@ -123,7 +123,7 @@ The elimination order (cheapest/strongest first):
 
 | `drop_cause` | Decided by | Signals |
 |---|---|---|
-| `cpu/io back-pressure` | the consumer/host can't keep up | appsink `buffer_fill_pct`, capture process CPU%, host busy%/iowait%, load-per-core |
+| `cpu/io back-pressure` | the consumer fell behind | appsink fill **spiked** (recent max, since it recovers by the drop line) — `buffer_fill_max_recent`; host CPU%/iowait% shown as context, not as the trigger |
 | `network: kernel UDP buffer` | socket overflow (raise `rmem_max`) | `udp_rcvbuf_errors_per_min` climbing |
 | `network: NIC/wire` | the link itself shedding packets | `nic_rx_errors_per_min` climbing |
 | `network: IP fragmentation` | fragments lost on reassembly | `ip_reasm_fails_per_min` climbing |

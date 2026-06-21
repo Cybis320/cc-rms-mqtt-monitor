@@ -85,16 +85,16 @@ class Thresholds:
     # These set when a signal is "hot" for the elimination logic that pins a
     # dropped-frame burst on a cause. They gate attribution text, and which
     # causes are host-explained vs. worth an on-demand probe -- not severity.
-    # Appsink buffer fill (%) that means the RMS consumer is falling behind
-    # (CPU/I-O back-pressure) rather than losing frames upstream.
-    buffer_fill_warn_pct: float = 70.0
-    # Capture process-tree CPU% (summed; can exceed 100 on multicore) that
-    # indicates the capture itself is CPU-bound.
-    capture_cpu_warn_pct: float = 250.0
-    # Host CPU busy% / iowait% / load-per-core that indicate host-wide pressure.
+    # Appsink buffer-fill SPIKE (%): the consumer briefly falling behind is the
+    # signature of CPU/I-O back-pressure. We use the recent MAX, not the value at
+    # the drop line (which has usually recovered to baseline by then). On a Pi,
+    # CPU is always high, so the buffer spike -- not CPU% -- is what tells
+    # "running hard" from "dropping". CPU/iowait are kept only as context.
+    buffer_fill_spike_pct: float = 30.0
+    # Host CPU busy% / iowait% for the host-level cpu_pressure check + as context
+    # in the back-pressure detail (cpu vs disk-I/O). Not a drop-cause trigger.
     cpu_busy_warn_pct: float = 90.0
     cpu_iowait_warn_pct: float = 20.0
-    load_per_core_warn: float = 2.0
     # NIC RX error and IP-reassembly growth rates (per min) that implicate the
     # wire/NIC or fragmentation. 0 = any increase counts (like udp_rcvbuf).
     nic_rx_errors_per_min_warn: float = 0.0

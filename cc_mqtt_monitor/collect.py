@@ -13,6 +13,7 @@ import json
 import shutil
 import subprocess
 import time
+import calendar
 
 from .solar import solar_elevation_deg
 from .sanitize import redact
@@ -457,6 +458,28 @@ _BUFFER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Window over which we take the MAX buffer fill (the spike). The fill at the drop
+# line itself has usually recovered, so a drop's cause is in the lead-up: a spike
+# up to a few minutes before, which must stay visible as long as its drops are in
+# the 10-min count -- hence a touch wider than 10 min.
+_SPIKE_WINDOW_S = 900           # 15 min (timestamped path)
+_SPIKE_WINDOW_POINTS = 90       # ~15 min at the ~10s log cadence (fallback path)
+
+# RMS log-line timestamp prefix, e.g. "2026/03/14 07:19:34-INFO-...".
+_LOG_TS_RE = re.compile(r"^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})")
+
+
+def _parse_log_ts(line):
+    """Epoch seconds for an RMS log line's leading timestamp, or None. Parsed as
+    UTC -- only deltas are used, so the actual zone is irrelevant."""
+    m = _LOG_TS_RE.match(line)
+    if not m:
+        return None
+    try:
+        return calendar.timegm(time.strptime(m.group(1), "%Y/%m/%d %H:%M:%S"))
+    except (ValueError, OverflowError):
+        return None
+
 # GStreamer pipeline (re)build: RMS logs the full pipeline string each time it
 # (re)connects rtspsrc, so counting these in the tail measures reconnect churn.
 _PIPELINE_BUILD_RE = re.compile(r"GStreamer pipeline string")
@@ -530,6 +553,7 @@ def collect_logs(station, max_lines, warning_ignore=None):
         "last_warning": None,
         "last_watchdog_event": None,
         "buffer_fill_pct": None,
+        "buffer_fill_max_recent": None,
         "dropped_frames_10min": None,
         "dropped_frames_session": None,
         "pipeline_reconnects": 0,
@@ -538,6 +562,7 @@ def collect_logs(station, max_lines, warning_ignore=None):
     log_path = _newest_log(station)
     if not log_path:
         return result
+    buffer_points = []   # (ts_epoch_or_None, fill_pct) for each Buffer-fill line
 
     result["log_file"] = os.path.basename(log_path)
     result["log_age_s"] = round(time.time() - _safe_mtime(log_path), 1)
@@ -568,14 +593,29 @@ def collect_logs(station, max_lines, warning_ignore=None):
 
         buf = _BUFFER_RE.search(line)
         if buf:
-            result["buffer_fill_pct"] = float(buf.group(1))
+            fill = float(buf.group(1))
+            result["buffer_fill_pct"] = fill
             result["dropped_frames_10min"] = int(buf.group(2))
             result["dropped_frames_session"] = int(buf.group(3))
+            buffer_points.append((_parse_log_ts(line), fill))
 
         if _PIPELINE_BUILD_RE.search(line):
             result["pipeline_reconnects"] += 1
         elif _DECODER_ERR_RE.search(line):
             result["decoder_errors"] += 1
+
+    # Peak buffer fill in the recent window -- the back-pressure signal, since the
+    # fill at the drop line has usually recovered to baseline. Prefer the
+    # timestamped window; fall back to the last N points if timestamps don't parse.
+    if buffer_points:
+        timed = [(t, f) for t, f in buffer_points if t is not None]
+        if timed:
+            newest = timed[-1][0]
+            recent = [f for t, f in timed if 0 <= newest - t <= _SPIKE_WINDOW_S]
+        else:
+            recent = [f for _, f in buffer_points[-_SPIKE_WINDOW_POINTS:]]
+        if recent:
+            result["buffer_fill_max_recent"] = round(max(recent), 1)
 
     return result
 

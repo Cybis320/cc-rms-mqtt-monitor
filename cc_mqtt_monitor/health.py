@@ -93,29 +93,28 @@ def classify_drops(metrics, host_metrics, thresholds):
         return {"drop_cause": cause, "drop_confidence": confidence,
                 "drop_detail": detail}
 
-    # 1) CPU / I-O back-pressure: the consumer (appsink) or the host is the
-    #    bottleneck. The appsink filling is the most specific per-station tell.
-    fill = _num(metrics, "buffer_fill_pct")
-    cpu_proc = _num(metrics, "capture_cpu_pct")
-    cpu_busy = _num(h, "cpu_busy_pct")
-    iowait = _num(h, "cpu_iowait_pct")
-    load = _num(h, "load_per_core")
-    if _hot(fill, thresholds.buffer_fill_warn_pct):
-        return verdict(CAUSE_BACKPRESSURE, "high", "appsink buffer %.0f%% full" % fill)
-    if (_hot(cpu_proc, thresholds.capture_cpu_warn_pct)
-            or _hot(cpu_busy, thresholds.cpu_busy_warn_pct)
-            or _hot(iowait, thresholds.cpu_iowait_warn_pct)
-            or _hot(load, thresholds.load_per_core_warn)):
-        bits = []
+    # 1) CPU / I-O back-pressure: the consumer fell behind and the appsink buffer
+    #    SPIKED in the lead-up to the drop. We key on the recent MAX fill, not the
+    #    fill at the drop line (which has usually recovered to baseline by the time
+    #    the 10-min count logs). CPU% is deliberately NOT a trigger -- a busy Pi
+    #    runs hot whether or not it drops, so the spike is the discriminator; CPU/
+    #    iowait appear only as context to hint cpu- vs disk-bound.
+    spike = _num(metrics, "buffer_fill_max_recent")
+    if _hot(spike, thresholds.buffer_fill_spike_pct):
+        ctx = []
+        cpu_busy = _num(h, "cpu_busy_pct")
+        iowait = _num(h, "cpu_iowait_pct")
+        cpu_proc = _num(metrics, "capture_cpu_pct")
         if cpu_busy is not None:
-            bits.append("host cpu %.0f%%" % cpu_busy)
+            ctx.append("host cpu %.0f%%" % cpu_busy)
         if iowait is not None:
-            bits.append("iowait %.0f%%" % iowait)
+            ctx.append("iowait %.0f%%" % iowait)
         if cpu_proc is not None:
-            bits.append("capture %.0f%%" % cpu_proc)
-        if load is not None:
-            bits.append("load/core %.1f" % load)
-        return verdict(CAUSE_BACKPRESSURE, "high", ", ".join(bits) or "host busy")
+            ctx.append("capture %.0f%%" % cpu_proc)
+        detail = "buffer fill spiked to %.0f%%" % spike
+        if ctx:
+            detail += " (" + ", ".join(ctx) + ")"
+        return verdict(CAUSE_BACKPRESSURE, "high", detail)
 
     # 2) Network layers with their own positive counter (host-wide rates).
     if _hot(_num(h, "udp_rcvbuf_errors_per_min"), thresholds.udp_rcvbuf_errors_per_min_warn):
