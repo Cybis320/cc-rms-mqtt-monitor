@@ -448,6 +448,8 @@ _DEFAULT_WARNING_IGNORE = [
     # the actual dropping is already covered by the dropped_frames check + drop_cause
     r"Fewer than \d+ images found, cannot create timelapse",   # tiny day/night-transition
     # session: RMS returns before writing any json/mp4, so timelapse_missing won't fire either
+    r"too many sporadics per hour",                            # Flux QC: skips a too-noisy
+    # directory for the meteor-rate calc -- a science-pipeline decision, not station health
 ]
 
 

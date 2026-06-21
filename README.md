@@ -103,8 +103,10 @@ warnings by default — ExtractStars `Too many candidate stars`, numpy/scipy
 lock race, `alignPlatepar: Fit did not converge` (self-recovers), and `Dropped
 frames timestamp queue exceeded safety limit` (RMS memory-cap housekeeping —
 already covered by the `dropped_frames` check), and `Fewer than N images found,
-cannot create timelapse` (a tiny day/night-transition frame session). Add your
-own patterns with `log_warning_ignore` (regex). Genuinely actionable warnings
+cannot create timelapse` (a tiny day/night-transition frame session), and `too
+many sporadics per hour` (a Flux meteor-rate QC skip — science pipeline, not
+station health). Add your own patterns with `log_warning_ignore` (regex).
+Genuinely actionable warnings
 (camera-switch / upload / ffmpeg / reboot failures, …) still alert.
 
 > `Too many candidate stars` is in the default ignore list. It fires almost
