@@ -52,7 +52,7 @@ group: null
 # Empty = all on. Keys: capture_down, capture_stalled, detection_stalled,
 # timelapse_missing, timelapse_overdue, log_fatal, log_warning, watchdog,
 # disk_low, upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames,
-# oom, mem_pressure, udp_rcvbuf_errors, nic_errors, cpu_pressure.
+# oom, mem_pressure, udp_rcvbuf_errors, nic_errors, disk_errors.
 disabled_checks: []
 
 # Dropped-frame attribution: each station record carries a drop_cause /
@@ -101,8 +101,9 @@ thresholds:
                                  # back-pressure tell; the fill at the drop line
                                  # has usually recovered. CPU% is NOT a trigger
                                  # (a busy Pi runs hot regardless) -- the spike is.
-  cpu_busy_warn_pct: 90          # host CPU saturated (host cpu_pressure check + context)
-  cpu_iowait_warn_pct: 20        # host blocked on disk I/O (context: cpu vs disk)
+  # (no CPU/iowait alert: heavy processing legitimately spikes both. Disk trouble
+  #  is caught by the kernel-log disk_errors check, which doesn't fire on a slow
+  #  SD card -- only on actual I/O errors / a read-only remount.)
   nic_rx_errors_per_min_warn: 0  # NIC RX errors climbing => wire/cable/duplex
   ip_reasm_fails_per_min_warn: 0 # IP fragment-reassembly drops climbing
   decoder_errors_warn: 1         # in-log decoder/concealment errors (upstream loss)

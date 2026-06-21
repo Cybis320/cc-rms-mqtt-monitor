@@ -91,10 +91,10 @@ class Thresholds:
     # CPU is always high, so the buffer spike -- not CPU% -- is what tells
     # "running hard" from "dropping". CPU/iowait are kept only as context.
     buffer_fill_spike_pct: float = 30.0
-    # Host CPU busy% / iowait% for the host-level cpu_pressure check + as context
-    # in the back-pressure detail (cpu vs disk-I/O). Not a drop-cause trigger.
-    cpu_busy_warn_pct: float = 90.0
-    cpu_iowait_warn_pct: float = 20.0
+    # (Host CPU busy%/iowait% are collected as published CONTEXT only -- there is
+    # no CPU/iowait alert: on these boxes heavy processing legitimately spikes
+    # both, so "busy" isn't actionable. Real disk trouble is caught by the
+    # kernel-log disk_errors check instead, which doesn't fire on a slow card.)
     # NIC RX error and IP-reassembly growth rates (per min) that implicate the
     # wire/NIC or fragmentation. 0 = any increase counts (like udp_rcvbuf).
     nic_rx_errors_per_min_warn: float = 0.0

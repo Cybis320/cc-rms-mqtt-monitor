@@ -38,7 +38,7 @@ CHECK_KEYS = (
     "mem_pressure",       # host memory pressure (PSI) -- the pre-OOM signal
     "udp_rcvbuf_errors",  # host UDP receive-buffer overflows climbing (udp RTSP)
     "nic_errors",         # host NIC RX errors climbing (wire/link)
-    "cpu_pressure",       # host CPU saturated / high iowait (back-pressure)
+    "disk_errors",        # host kernel disk I/O errors / read-only remount
 )
 
 
@@ -360,14 +360,16 @@ def evaluate_host(metrics, thresholds, disabled=()):
              "NIC RX errors climbing: %.1f/min (%s total)"
              % (nic_rate, metrics.get("nic_rx_errors")))
 
-    # Sustained CPU saturation / disk-I-O wait: the host-side back-pressure that
-    # makes capture consumers drop frames. iowait is the disk-write signal.
-    busy = metrics.get("cpu_busy_pct")
-    iowait = metrics.get("cpu_iowait_pct")
-    if busy is not None and busy > thresholds.cpu_busy_warn_pct:
-        flag(DEGRADED, "cpu_pressure", "Host CPU %.0f%% busy" % busy)
-    elif iowait is not None and iowait > thresholds.cpu_iowait_warn_pct:
-        flag(DEGRADED, "cpu_pressure", "Host I/O wait %.0f%%" % iowait)
+    # Disk/storage failure from the kernel log -- the medium-agnostic "disk
+    # failing" canary. Unlike iowait (chronically high on a healthy-but-slow SD
+    # card, so it can't tell slow from failing), these are actual I/O errors. A
+    # filesystem remounted read-only means the disk has effectively given up.
+    if metrics.get("disk_fs_readonly"):
+        flag(ERROR, "disk_errors", "Filesystem remounted READ-ONLY (disk failing): %s"
+             % (metrics.get("last_disk_error") or "see kernel log"))
+    elif metrics.get("disk_error_count"):
+        flag(DEGRADED, "disk_errors", "Kernel disk I/O errors (%dx): %s"
+             % (metrics["disk_error_count"], metrics.get("last_disk_error") or "see kernel log"))
 
     return state["status"], state["problems"]
 

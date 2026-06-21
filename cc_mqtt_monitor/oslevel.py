@@ -98,15 +98,18 @@ def _kernel_log_lines(max_lines):
     return [], "kernel log not readable (need adm/systemd-journal group or root)"
 
 
-def scan_oom(max_lines=1500):
-    """Count OOM-kill events in the recent kernel log and return the last victim."""
+def scan_oom(max_lines=1500, lines=None, note=None):
+    """Count OOM-kill events in the recent kernel log and return the last victim.
+    `lines`/`note` may be passed in to share one kernel-log read with other
+    scanners (e.g. scan_disk_errors); otherwise the log is read here."""
     result = {
         "oom_kill_count": 0,
         "last_oom_victim": None,
         "last_oom_line": None,
         "oom_note": None,
     }
-    lines, note = _kernel_log_lines(max_lines)
+    if lines is None:
+        lines, note = _kernel_log_lines(max_lines)
     if note:
         result["oom_note"] = note
         return result
@@ -120,6 +123,50 @@ def scan_oom(max_lines=1500):
             result["last_oom_victim"] = victim
             # Published to the public feed -> redact IPs/paths from the raw line.
             result["last_oom_line"] = redact(line.strip())[:300]
+    return result
+
+
+# Disk/storage failure signatures in the kernel log -- the medium-agnostic
+# "disk is failing" signal. Unlike iowait (high and noisy on a healthy-but-slow
+# SD card), these fire only on ACTUAL I/O failure, so they don't false-alarm on
+# a worn-but-working card. The read-only remount is the classic "card died".
+_DISK_ERR_RE = re.compile(
+    r"Buffer I/O error|\bI/O error|blk_update_request:.*error|"
+    r"critical (?:medium|target) error|"
+    r"mmc\d+:\s.*(?:error|timeout)|mmcblk\d+:.*(?:error|I/O)|"
+    r"EXT4-fs (?:error|warning)|"
+    r"(?:Remounting|remount(?:ing|ed)?) filesystem read-only|"
+    r"Remounting .*read-only|writeback error",
+    re.IGNORECASE,
+)
+# The filesystem giving up and going read-only is a step beyond a transient
+# error -- treated as the severe case.
+_FS_READONLY_RE = re.compile(r"read-only", re.IGNORECASE)
+
+
+def scan_disk_errors(max_lines=1500, lines=None, note=None):
+    """Count storage I/O-failure lines in the recent kernel log.
+
+    `disk_fs_readonly` flags the severe case (a filesystem remounted read-only).
+    Shares the kernel-log read with scan_oom when `lines` is passed in."""
+    result = {
+        "disk_error_count": 0,
+        "last_disk_error": None,
+        "disk_fs_readonly": False,
+        "disk_error_note": None,
+    }
+    if lines is None:
+        lines, note = _kernel_log_lines(max_lines)
+    if note:
+        result["disk_error_note"] = note
+        return result
+
+    for line in lines:
+        if _DISK_ERR_RE.search(line):
+            result["disk_error_count"] += 1
+            result["last_disk_error"] = redact(line.strip())[:300]
+            if _FS_READONLY_RE.search(line):
+                result["disk_fs_readonly"] = True
     return result
 
 
@@ -427,7 +474,10 @@ def collect_host(scan_oom_events=True, udp=False, cam_interfaces=None):
     metrics = read_meminfo()
     metrics.update(read_psi_memory())
     if scan_oom_events:
-        metrics.update(scan_oom())
+        # One kernel-log read shared by the OOM and disk-error scanners.
+        klines, knote = _kernel_log_lines(1500)
+        metrics.update(scan_oom(lines=klines, note=knote))
+        metrics.update(scan_disk_errors(lines=klines, note=knote))
     metrics["uptime_s"] = _uptime()
     metrics.update(collect_cpu_pressure())
     metrics.update(collect_nic_errors(cam_interfaces))
