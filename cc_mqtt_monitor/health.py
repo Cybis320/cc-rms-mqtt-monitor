@@ -35,7 +35,7 @@ CHECK_KEYS = (
     "clock_uncertainty",  # last summary clock error over threshold
     "dropped_frames",     # dropped frames in the last 10 min
     "oom",                # host OOM-killer fired
-    "host_memory",        # host available memory low / critically low
+    "mem_pressure",       # host memory pressure (PSI) -- the pre-OOM signal
     "udp_rcvbuf_errors",  # host UDP receive-buffer overflows climbing (udp RTSP)
     "nic_errors",         # host NIC RX errors climbing (wire/link)
     "cpu_pressure",       # host CPU saturated / high iowait (back-pressure)
@@ -321,12 +321,25 @@ def evaluate_host(metrics, thresholds, disabled=()):
         flag(level, "oom", "OOM-killer fired %dx (last victim: %s)"
              % (metrics["oom_kill_count"], victim))
 
+    # Memory pressure (PSI) -- the actual pre-OOM signal. The kernel OOM-killer
+    # fires on allocation-failure-after-reclaim, not at a fixed free-MB line, so
+    # an absolute MemAvailable threshold both false-alarms on a small (2 GB Pi)
+    # host and can miss a fast spike on a big one. `full avgN` from
+    # /proc/pressure/memory is the % of time EVERY task was stalled on memory
+    # (the box thrashing in reclaim) -- a stall ratio, so it means the same on a
+    # Pi and a 32 GB box with no per-host tuning. avg10 reacts fast (warn on the
+    # onset); sustained avg60 is the serious, OOM-is-near signal (error).
+    full10 = metrics.get("mem_psi_full_avg10")
+    full60 = metrics.get("mem_psi_full_avg60")
     avail = metrics.get("mem_available_mb")
-    if avail is not None:
-        if avail <= thresholds.mem_available_error_mb:
-            flag(ERROR, "host_memory", "Host memory critically low: %d MB available" % avail)
-        elif avail <= thresholds.mem_available_warn_mb:
-            flag(DEGRADED, "host_memory", "Host memory low: %d MB available" % avail)
+    avail_txt = (", %d MB available" % avail) if avail is not None else ""
+    if full60 is not None and full60 > thresholds.mem_psi_full_avg60_error:
+        flag(ERROR, "mem_pressure",
+             "Sustained memory pressure: %.1f%% full-stall over 60s%s (OOM risk)"
+             % (full60, avail_txt))
+    elif full10 is not None and full10 > thresholds.mem_psi_full_avg10_warn:
+        flag(DEGRADED, "mem_pressure",
+             "Memory pressure: %.1f%% full-stall over 10s%s" % (full10, avail_txt))
 
     # UDP receive-buffer overflows climbing (kernel-dropped RTSP datagrams; the
     # host-level analogue of dropped frames). Rate-based: a null rate (first

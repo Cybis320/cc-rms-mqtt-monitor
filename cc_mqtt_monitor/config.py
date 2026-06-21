@@ -74,9 +74,12 @@ class Thresholds:
     # Default 0 = alert on ANY increase (max sensitivity for the initial data-
     # gathering phase); raise it (e.g. 60) once the per-host noise floor is known.
     udp_rcvbuf_errors_per_min_warn: float = 0.0
-    # Host memory headroom (MB) before warning / erroring.
-    mem_available_warn_mb: int = 800
-    mem_available_error_mb: int = 300
+    # Memory pressure (PSI, /proc/pressure/memory) -- the pre-OOM signal, scale-
+    # independent (a stall %, identical meaning on a 2 GB Pi and a 32 GB box), so
+    # it replaces the old absolute MemAvailable thresholds. `full avg10` % to
+    # warn ABOVE (onset); sustained `full avg60` % to error ABOVE (OOM risk).
+    mem_psi_full_avg10_warn: float = 10.0
+    mem_psi_full_avg60_error: float = 10.0
 
     # --- Dropped-frame attribution (classify_drops) ----------------------
     # These set when a signal is "hot" for the elimination logic that pins a

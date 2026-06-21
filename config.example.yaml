@@ -52,7 +52,7 @@ group: null
 # Empty = all on. Keys: capture_down, capture_stalled, detection_stalled,
 # timelapse_missing, timelapse_overdue, log_fatal, log_warning, watchdog,
 # disk_low, upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames,
-# oom, host_memory, udp_rcvbuf_errors, nic_errors, cpu_pressure.
+# oom, mem_pressure, udp_rcvbuf_errors, nic_errors, cpu_pressure.
 disabled_checks: []
 
 # Dropped-frame attribution: each station record carries a drop_cause /
@@ -88,8 +88,11 @@ thresholds:
                                # ~4 files/camera/night accumulate when uploads fail
   clock_error_warn_ms: 100
   dropped_frames_warn: 10      # dropped frames per 10 min before warning
-  mem_available_warn_mb: 800   # host RAM headroom (OOM early warning)
-  mem_available_error_mb: 300
+  # Memory pressure (PSI) -- the pre-OOM signal, scale-independent (% stall, same
+  # on a 2 GB Pi and a 32 GB box), so no per-host RAM tuning. degraded when the
+  # 10s full-stall % spikes; error when the 60s full-stall % stays high (OOM near).
+  mem_psi_full_avg10_warn: 10  # % time ALL tasks stalled on memory over 10s
+  mem_psi_full_avg60_error: 10 # % over 60s (sustained => OOM risk)
 
   # --- Dropped-frame attribution (classify_drops) + adaptive probe ---
   # These tune which cause a drop is pinned on, and whether it's host-explained

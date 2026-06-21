@@ -1,4 +1,4 @@
-"""Host-level OS signals: memory headroom and OOM-killer events.
+"""Host-level OS signals: memory pressure (PSI) + headroom and OOM-killer events.
 
 These are host-wide (not per-station), so they are published under a separate
 host health topic. The OOM scan is best-effort: if the kernel log is not
@@ -33,6 +33,41 @@ def read_meminfo():
         "mem_total_mb": round(fields.get("MemTotal", 0) / 1024.0),
         "swap_free_mb": round(fields.get("SwapFree", 0) / 1024.0),
     }
+
+
+def read_psi_memory():
+    """Memory Pressure Stall Information from /proc/pressure/memory.
+
+    `some avgN` = % of the last N s at least one task was stalled on memory;
+    `full avgN` = % of time EVERY task was stalled (the box thrashing in reclaim)
+    -- the leading pre-OOM indicator, and a stall RATIO so it needs no per-host
+    scaling. Null (PSI disabled / kernel <4.20) leaves the fields None, so the
+    memory-pressure check simply doesn't fire rather than erroring."""
+    result = {"mem_psi_some_avg10": None, "mem_psi_full_avg10": None,
+              "mem_psi_full_avg60": None}
+    try:
+        with open("/proc/pressure/memory") as fh:
+            lines = fh.readlines()
+    except (IOError, OSError):
+        return result
+    for line in lines:
+        parts = line.split()
+        if not parts:
+            continue
+        kind = parts[0]   # "some" or "full"
+        fields = {}
+        for tok in parts[1:]:
+            k, _, v = tok.partition("=")
+            fields[k] = v
+        try:
+            if kind == "some":
+                result["mem_psi_some_avg10"] = float(fields["avg10"])
+            elif kind == "full":
+                result["mem_psi_full_avg10"] = float(fields["avg10"])
+                result["mem_psi_full_avg60"] = float(fields["avg60"])
+        except (KeyError, ValueError):
+            continue
+    return result
 
 
 def _kernel_log_lines(max_lines):
@@ -325,6 +360,7 @@ def collect_host(scan_oom_events=True, udp=False):
     pressure and NIC errors are always collected -- they're cheap and apply to
     every dropped-frame attribution regardless of transport."""
     metrics = read_meminfo()
+    metrics.update(read_psi_memory())
     if scan_oom_events:
         metrics.update(scan_oom())
     metrics["uptime_s"] = _uptime()
