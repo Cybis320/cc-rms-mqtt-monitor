@@ -31,6 +31,10 @@ def main(argv=None):
                         help="run a single collect+publish cycle and exit")
     parser.add_argument("--status", action="store_true",
                         help="print station health as JSON locally (no MQTT)")
+    parser.add_argument("--diagnose", nargs="?", const="", metavar="STATION",
+                        help="force the deep dropped-frame probe (ffprobe keyframe "
+                             "peak + camera ping) on STATION (or all stations if "
+                             "omitted), print the attribution, then exit -- no MQTT")
     parser.add_argument("--viewer", action="store_true",
                         help="subscribe to the broker and show a live status table")
     parser.add_argument("--test", action="store_true",
@@ -53,13 +57,48 @@ def main(argv=None):
     if args.interval:
         config.interval_seconds = args.interval
 
-    # --status: pure local diagnostics, no broker connection needed.
+    # --status: pure local diagnostics, no broker connection needed. The host
+    # record is gathered first and passed into station evaluation so dropped-
+    # frame attribution can use the host-wide CPU/NIC/UDP signals.
     if args.status:
+        host = monitor.gather_host(config)
         output = {
-            "host": monitor.gather_host(config),
-            "stations": monitor.gather(config),
+            "host": host,
+            "stations": monitor.gather(config, host_metrics=host),
         }
         print(json.dumps(output, indent=2, default=str))
+        return 0
+
+    # --diagnose: force the heavy probe and print the dropped-frame attribution.
+    if args.diagnose is not None:
+        host, reports = monitor.run_diagnose(config, args.diagnose or None)
+        if not reports:
+            print("No matching station%s."
+                  % (" '%s'" % args.diagnose if args.diagnose else ""))
+            return 1
+        for st in reports:
+            print("=== %s ===" % st["station_id"])
+            cause = st.get("drop_cause")
+            if cause:
+                print("  dropped (10min): %s" % st.get("dropped_frames_10min"))
+                print("  cause: %s (%s) -- %s"
+                      % (cause, st.get("drop_confidence"), st.get("drop_detail")))
+            else:
+                print("  no dropped frames to attribute (10min: %s)"
+                      % st.get("dropped_frames_10min"))
+            for k in ("buffer_fill_pct", "capture_cpu_pct", "decoder_errors",
+                      "pipeline_reconnects", "stream_mbps", "probe_keyframe_peak_kb",
+                      "probe_stream_mbps", "probe_ping_loss_pct", "probe_ping_rtt_max_ms",
+                      "probe_keyframe_note", "probe_ping_note"):
+                if st.get(k) is not None:
+                    print("    %-22s %s" % (k, st[k]))
+        if host:
+            print("=== host ===")
+            for k in ("cpu_busy_pct", "cpu_iowait_pct", "load_per_core",
+                      "nic_rx_errors_per_min", "udp_rcvbuf_errors_per_min",
+                      "ip_reasm_fails_per_min"):
+                if host.get(k) is not None:
+                    print("    %-22s %s" % (k, host[k]))
         return 0
 
     if args.viewer:

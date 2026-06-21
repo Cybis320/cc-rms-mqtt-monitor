@@ -78,6 +78,36 @@ class Thresholds:
     mem_available_warn_mb: int = 800
     mem_available_error_mb: int = 300
 
+    # --- Dropped-frame attribution (classify_drops) ----------------------
+    # These set when a signal is "hot" for the elimination logic that pins a
+    # dropped-frame burst on a cause. They gate attribution text, and which
+    # causes are host-explained vs. worth an on-demand probe -- not severity.
+    # Appsink buffer fill (%) that means the RMS consumer is falling behind
+    # (CPU/I-O back-pressure) rather than losing frames upstream.
+    buffer_fill_warn_pct: float = 70.0
+    # Capture process-tree CPU% (summed; can exceed 100 on multicore) that
+    # indicates the capture itself is CPU-bound.
+    capture_cpu_warn_pct: float = 250.0
+    # Host CPU busy% / iowait% / load-per-core that indicate host-wide pressure.
+    cpu_busy_warn_pct: float = 90.0
+    cpu_iowait_warn_pct: float = 20.0
+    load_per_core_warn: float = 2.0
+    # NIC RX error and IP-reassembly growth rates (per min) that implicate the
+    # wire/NIC or fragmentation. 0 = any increase counts (like udp_rcvbuf).
+    nic_rx_errors_per_min_warn: float = 0.0
+    ip_reasm_fails_per_min_warn: float = 0.0
+    # Decoder-error / pipeline-reconnect counts in the scanned log tail that mark
+    # in-pipeline corruption (the symptom of packets lost upstream of decode).
+    decoder_errors_warn: int = 1
+    pipeline_reconnects_warn: int = 3
+    # On-demand probe: ping packet-loss% to the camera that confirms link loss.
+    ping_loss_warn_pct: float = 1.0
+    # Adaptive escalation: when drops are unexplained-on-host, run a heavy probe
+    # at most this often per station, backing off (doubling) up to the max while
+    # the camera stays bad -- so a persistently-bad stream is never re-hammered.
+    probe_min_interval_s: int = 600
+    probe_max_interval_s: int = 3600
+
 
 @dataclass
 class Config:
@@ -120,6 +150,12 @@ class Config:
 
     # Health checks to silence, by key (see health.CHECK_KEYS). Empty = all on.
     disabled_checks: list = field(default_factory=list)
+
+    # Let the monitor self-escalate to a heavy on-demand probe (ffprobe keyframe
+    # peak + ping loss) when a station drops frames the cheap host signals can't
+    # explain. Off => only the manual `--diagnose` runs the heavy probes. The
+    # probe is still rate-limited/backed-off per station (see thresholds).
+    enable_adaptive_probe: bool = True
 
     # Extra regex patterns of WARNING-level log lines to NOT alert on, added to
     # the built-in benign defaults (ExtractStars star-cap, numpy/scipy warnings,

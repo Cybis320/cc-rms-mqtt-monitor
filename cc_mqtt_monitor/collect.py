@@ -50,6 +50,30 @@ def _iter_proc():
         yield pid, args, ppid, vmrss_kb
 
 
+_CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+# Per-station previous CPU sample {station_id: (jiffies, monotonic_t)}, so the
+# capture tree's CPU% can be derived from the cumulative utime+stime counters.
+_PROC_CPU_LAST = {}
+
+
+def _proc_cpu_jiffies(pid):
+    """utime+stime (clock ticks) for a pid, or 0 if unreadable. The comm field
+    can contain spaces/parens, so fields are parsed AFTER the final ')'."""
+    try:
+        with open("/proc/%d/stat" % pid) as fh:
+            data = fh.read()
+    except (IOError, OSError):
+        return 0
+    rpar = data.rfind(")")
+    if rpar < 0:
+        return 0
+    fields = data[rpar + 2:].split()
+    try:
+        return int(fields[11]) + int(fields[12])   # utime, stime (post-comm index)
+    except (ValueError, IndexError):
+        return 0
+
+
 def _process_config_path(pid, args):
     """The .config a StartCapture process uses: the ``-c/--config`` argument when
     given (multicam), else the default ``.config`` in the process's working
@@ -102,11 +126,27 @@ def collect_process(station):
 
     total_rss_mb = round(sum(rss for _, _, rss in matches) / 1024.0, 1)
 
+    # CPU% of the whole capture tree over the interval (delta of cumulative
+    # utime+stime / wall time). A saturated capture process is the on-station
+    # signature of CPU back-pressure dropping frames. First sample => null.
+    cpu_pct = None
+    jiffies = sum(_proc_cpu_jiffies(pid) for pid in match_pids)
+    now = time.monotonic()
+    last = _PROC_CPU_LAST.get(station.station_id)
+    if matches and last is not None and now > last[1] and jiffies >= last[0]:
+        secs = (jiffies - last[0]) / float(_CLK_TCK)
+        cpu_pct = round(secs / (now - last[1]) * 100.0, 1)
+    if matches:
+        _PROC_CPU_LAST[station.station_id] = (jiffies, now)
+    else:
+        _PROC_CPU_LAST.pop(station.station_id, None)
+
     return {
         "capture_alive": bool(matches),
         "process_count": len(matches),
         "main_pid": main_pid,
         "total_rss_mb": total_rss_mb,
+        "capture_cpu_pct": cpu_pct,
     }
 
 
@@ -288,6 +328,64 @@ def collect_timelapse(station, now=None):
 
 
 # ---------------------------------------------------------------------------
+# Delivered camera bandwidth (the "camera/link bitrate" class)
+# ---------------------------------------------------------------------------
+
+
+def newest_segment(station, now=None):
+    """Path of the newest FINALIZED raw video segment, or None.
+
+    Walks VideoFiles/<year>/<date>/<hour>/ and returns the newest segment whose
+    mtime is at least one segment-duration old (the in-progress one is still
+    growing). Shared by the cheap bandwidth read and the on-demand keyframe probe.
+    """
+    if not station.raw_video_save:
+        return None
+    now = now or time.time()
+    hour_dir = station.video_path
+    for _ in range(3):  # year -> date -> hour
+        nxt = _latest_subdir(hour_dir)
+        if not nxt:
+            return None
+        hour_dir = nxt
+
+    dur = station.raw_video_duration or 30.0
+    try:
+        segs = [os.path.join(hour_dir, n) for n in os.listdir(hour_dir)
+                if n.lower().endswith((".mkv", ".mp4"))]
+    except (IOError, OSError):
+        return None
+    segs.sort(reverse=True)   # newest first by name (sortable timestamp)
+    for s in segs:
+        if now - _safe_mtime(s) >= dur:
+            return s
+    return segs[0] if segs else None
+
+
+def collect_stream_bandwidth(station, now=None):
+    """Delivered bitrate of the camera stream, from raw video segment SIZE.
+
+    RMS (raw_video_save) writes fixed-duration .mkv segments, so bytes /
+    segment-seconds is the delivered bitrate with no decode -- cheap enough for
+    every cycle on a Pi. Rising bitrate that tracks dropped frames while the host
+    signals stay clean is the camera/link-bandwidth signature.
+    """
+    now = now or time.time()
+    result = {"stream_mbps": None, "stream_segment_age_s": None}
+    seg = newest_segment(station, now)
+    if seg is None:
+        return result
+    try:
+        size = os.path.getsize(seg)
+    except OSError:
+        return result
+    dur = station.raw_video_duration or 30.0
+    result["stream_mbps"] = round(size * 8 / dur / 1e6, 1)
+    result["stream_segment_age_s"] = round(now - _safe_mtime(seg), 1)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Detection output (silent-failure class: alive + capturing but no output)
 # ---------------------------------------------------------------------------
 
@@ -358,6 +456,18 @@ _BUFFER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# GStreamer pipeline (re)build: RMS logs the full pipeline string each time it
+# (re)connects rtspsrc, so counting these in the tail measures reconnect churn.
+_PIPELINE_BUILD_RE = re.compile(r"GStreamer pipeline string")
+# Decoder-side corruption/timing faults: the in-pipeline symptom of packets lost
+# upstream (a damaged keyframe), distinct from a clean back-pressure drop. Covers
+# both the gst decoder and any libav fallback wording seen in RMS logs.
+_DECODER_ERR_RE = re.compile(
+    r"concealing\s+\d+|decreasing timestamp|error while decoding|corrupt(?:ed)? "
+    r"(?:decoded )?frame|RTP: missed|lost.*packet",
+    re.IGNORECASE,
+)
+
 
 def _newest_log(station):
     # RMS capture logs are named "log_<stationID>_<timestamp>_NNN.log". Anchor
@@ -421,6 +531,8 @@ def collect_logs(station, max_lines, warning_ignore=None):
         "buffer_fill_pct": None,
         "dropped_frames_10min": None,
         "dropped_frames_session": None,
+        "pipeline_reconnects": 0,
+        "decoder_errors": 0,
     }
     log_path = _newest_log(station)
     if not log_path:
@@ -456,6 +568,11 @@ def collect_logs(station, max_lines, warning_ignore=None):
             result["buffer_fill_pct"] = float(buf.group(1))
             result["dropped_frames_10min"] = int(buf.group(2))
             result["dropped_frames_session"] = int(buf.group(3))
+
+        if _PIPELINE_BUILD_RE.search(line):
+            result["pipeline_reconnects"] += 1
+        elif _DECODER_ERR_RE.search(line):
+            result["decoder_errors"] += 1
 
     return result
 
@@ -656,6 +773,7 @@ def collect_station(station, max_log_lines, now=None, warning_ignore=None):
     metrics.update(collect_platepar(station))
     metrics.update(collect_frames(station, now))
     metrics.update(collect_timelapse(station, now))
+    metrics.update(collect_stream_bandwidth(station, now))
     metrics.update(collect_detection(station, now))
     metrics.update(collect_logs(station, max_log_lines, warning_ignore))
     metrics.update(collect_summary(station))

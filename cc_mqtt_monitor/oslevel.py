@@ -156,15 +156,183 @@ def collect_udp_errors():
     return result
 
 
+# ---------------------------------------------------------------------------
+# CPU / I-O pressure (the "back-pressure" class of dropped frames)
+# ---------------------------------------------------------------------------
+
+# Previous /proc/stat aggregate-cpu jiffies, so we can derive busy/iowait/steal
+# PERCENTAGES over the interval (the raw fields are cumulative since boot).
+_CPU_LAST = {}
+
+
+def read_loadavg():
+    """1-minute load average and load-per-core (load normalised by CPU count).
+
+    load-per-core is the portable saturation signal: ~1.0 means the run queue
+    matches the cores; well above 1.0 means tasks are waiting for CPU, a cause
+    of capture back-pressure that is identical on x86 and a 4-core Pi."""
+    ncpu = os.cpu_count() or 1
+    try:
+        with open("/proc/loadavg") as fh:
+            load1 = float(fh.read().split()[0])
+    except (IOError, OSError, ValueError, IndexError):
+        return {"load1": None, "load_per_core": None, "ncpu": ncpu}
+    return {"load1": round(load1, 2),
+            "load_per_core": round(load1 / ncpu, 2),
+            "ncpu": ncpu}
+
+
+def collect_cpu_pressure():
+    """Busy / iowait / steal percentages over the interval from /proc/stat.
+
+    iowait% is the direct read on disk-I/O back-pressure (the capture consumer
+    blocked writing FF/frames), and busy% on CPU saturation. Both are deltas, so
+    the first cycle (no previous sample) yields nulls rather than a boot-to-now
+    average. Pi-friendly: a single short read of /proc/stat."""
+    result = {"cpu_busy_pct": None, "cpu_iowait_pct": None, "cpu_steal_pct": None}
+    result.update(read_loadavg())
+    try:
+        with open("/proc/stat") as fh:
+            parts = fh.readline().split()  # "cpu  user nice system idle iowait irq softirq steal ..."
+        if parts and parts[0] == "cpu":
+            vals = [int(x) for x in parts[1:]]
+        else:
+            return result
+    except (IOError, OSError, ValueError):
+        return result
+    # Index by the canonical /proc/stat order; missing trailing fields => 0.
+    idle = vals[3] if len(vals) > 3 else 0
+    iowait = vals[4] if len(vals) > 4 else 0
+    steal = vals[7] if len(vals) > 7 else 0
+    total = sum(vals)
+    last = _CPU_LAST
+    if last.get("total") is not None and total > last["total"]:
+        d_total = total - last["total"]
+        d_idle = (idle + iowait) - (last["idle"] + last["iowait"])
+        result["cpu_busy_pct"] = round((1.0 - d_idle / d_total) * 100.0, 1)
+        result["cpu_iowait_pct"] = round((iowait - last["iowait"]) / d_total * 100.0, 1)
+        result["cpu_steal_pct"] = round((steal - last["steal"]) / d_total * 100.0, 1)
+    _CPU_LAST.update(total=total, idle=idle, iowait=iowait, steal=steal)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# NIC errors and IP reassembly (the "loss on the wire / before the socket" class)
+# ---------------------------------------------------------------------------
+
+_NIC_LAST = {}   # previous summed NIC error counters + monotonic time
+
+
+def read_nic_stats():
+    """Summed RX/TX error+drop counters across real interfaces (/proc/net/dev).
+
+    RX errs/drop/fifo/frame is what the NIC itself shed; a non-zero, climbing
+    value points at the physical link (bad cable, duplex mismatch, dying port)
+    -- distinct from a full socket buffer (RcvbufErrors) or in-pipeline loss.
+    'lo' and virtual/down interfaces are skipped. Returns summed (rx_err, tx_err)
+    or (None, None) if /proc/net/dev can't be read."""
+    try:
+        with open("/proc/net/dev") as fh:
+            lines = fh.readlines()[2:]   # skip the two header rows
+    except (IOError, OSError):
+        return None, None
+    rx_err = tx_err = 0
+    for line in lines:
+        name, _, rest = line.partition(":")
+        name = name.strip()
+        if not rest or name == "lo" or name.startswith(("veth", "docker", "br-")):
+            continue
+        f = rest.split()
+        if len(f) < 12:
+            continue
+        try:
+            rx_err += int(f[2]) + int(f[3]) + int(f[4]) + int(f[5])  # errs drop fifo frame
+            tx_err += int(f[10]) + int(f[11])                        # errs drop
+        except (ValueError, IndexError):
+            continue
+    return rx_err, tx_err
+
+
+def collect_nic_errors():
+    """Host NIC RX/TX error totals plus an RX-error growth RATE (per min).
+
+    Like the UDP counter, the alertable signal is the rate: a climbing RX error
+    count during dropped frames implicates the wire/NIC, whereas a flat count
+    (with drops still happening) clears the NIC and points downstream."""
+    rx_err, tx_err = read_nic_stats()
+    result = {"nic_rx_errors": rx_err, "nic_tx_errors": tx_err,
+              "nic_rx_errors_per_min": None}
+    if rx_err is None:
+        return result
+    now = time.monotonic()
+    last_err, last_t = _NIC_LAST.get("rx"), _NIC_LAST.get("t")
+    if last_err is not None and last_t is not None and now > last_t:
+        d = rx_err - last_err
+        if d >= 0:   # negative => counters reset (NIC reset / reboot)
+            result["nic_rx_errors_per_min"] = round(d / (now - last_t) * 60.0, 1)
+    _NIC_LAST["rx"], _NIC_LAST["t"] = rx_err, now
+    return result
+
+
+_IP_REASM_LAST = {}
+
+
+def read_ip_reasm_fails():
+    """Ip.ReasmFails from /proc/net/snmp (fragment-reassembly drops).
+
+    Large UDP datagrams (some cameras emit them) that get IP-fragmented and lose
+    a fragment are dropped here -- counted in NEITHER RcvbufErrors nor NIC errs,
+    so without this a fragmentation problem looks like an unexplained drop."""
+    try:
+        with open("/proc/net/snmp") as fh:
+            lines = fh.readlines()
+    except (IOError, OSError):
+        return None
+    header = None
+    for line in lines:
+        if not line.startswith("Ip:"):
+            continue
+        cols = line.split()[1:]
+        if header is None:
+            header = cols
+            continue
+        try:
+            return int(dict(zip(header, cols))["ReasmFails"])
+        except (KeyError, ValueError):
+            return None
+    return None
+
+
+def collect_ip_reasm():
+    """IP reassembly-failure total and growth rate (per min)."""
+    fails = read_ip_reasm_fails()
+    result = {"ip_reasm_fails": fails, "ip_reasm_fails_per_min": None}
+    if fails is None:
+        return result
+    now = time.monotonic()
+    last, last_t = _IP_REASM_LAST.get("n"), _IP_REASM_LAST.get("t")
+    if last is not None and last_t is not None and now > last_t:
+        d = fails - last
+        if d >= 0:
+            result["ip_reasm_fails_per_min"] = round(d / (now - last_t) * 60.0, 1)
+    _IP_REASM_LAST["n"], _IP_REASM_LAST["t"] = fails, now
+    return result
+
+
 def collect_host(scan_oom_events=True, udp=False):
-    """Host-wide metrics dict. `udp=True` adds UDP RcvbufErrors stats (only
-    worth collecting when a station uses protocol: udp)."""
+    """Host-wide metrics dict. `udp=True` adds UDP RcvbufErrors + IP reassembly
+    stats (only worth collecting when a station uses protocol: udp). CPU/I-O
+    pressure and NIC errors are always collected -- they're cheap and apply to
+    every dropped-frame attribution regardless of transport."""
     metrics = read_meminfo()
     if scan_oom_events:
         metrics.update(scan_oom())
     metrics["uptime_s"] = _uptime()
+    metrics.update(collect_cpu_pressure())
+    metrics.update(collect_nic_errors())
     if udp:
         metrics.update(collect_udp_errors())
+        metrics.update(collect_ip_reasm())
     return metrics
 
 

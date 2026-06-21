@@ -35,6 +35,12 @@ class Station:
     log_dir: str
     upload_queue_file: str
     frame_dir: str = "FramesFiles"
+    # Raw video segments (RMS `raw_video_save`): their on-disk size is the cheap
+    # read on delivered camera bandwidth (bytes/segment-seconds = bitrate), with
+    # no decode. Only present when raw_video_save is on.
+    video_dir: str = "VideoFiles"
+    raw_video_save: bool = False
+    raw_video_duration: float = 30.0
     platepar_name: str = "platepar_cmn2010.cal"
     # Operator-defined grouping straight from the RMS .config (camera cluster /
     # location). None when unset ("none"). This is the primary subscription group.
@@ -55,6 +61,11 @@ class Station:
     # RTSP transport ("tcp"/"udp"). UDP can overflow the kernel receive buffer
     # (RcvbufErrors), which we monitor host-wide when any station uses it.
     protocol: str = "tcp"
+    # The camera's RTSP URL and the host/IP parsed from it (for the on-demand
+    # network/keyframe probes). None when the device isn't an rtsp:// URL
+    # (e.g. a v4l2 device index), in which case those probes are skipped.
+    device_url: str = None
+    camera_host: str = None
 
     @property
     def captured_path(self):
@@ -63,6 +74,10 @@ class Station:
     @property
     def frames_path(self):
         return os.path.join(self.data_dir, self.frame_dir)
+
+    @property
+    def video_path(self):
+        return os.path.join(self.data_dir, self.video_dir)
 
     @property
     def platepar_path(self):
@@ -116,6 +131,24 @@ def _as_float(value, default=0.0):
         return default
 
 
+def _camera_host(device_url):
+    """Host/IP from an RMS `device` value, or None if it isn't an rtsp:// URL.
+
+    RMS device URLs look like
+        rtsp://192.168.42.104:554/user=admin&password=&channel=1&stream=0.sdp
+    so we take the netloc between '://' and the first '/', drop any 'user@'
+    credentials and ':port', and return the bare host. A non-URL device (a v4l2
+    index, a path) yields None, which makes the network/keyframe probes skip it.
+    """
+    if not device_url or "://" not in device_url:
+        return None
+    netloc = device_url.split("://", 1)[1].split("/", 1)[0]
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[1]
+    host = netloc.split(":", 1)[0].strip()
+    return host or None
+
+
 def _station_from_config(config_path):
     cfg = _read_config(config_path)
     station_id = cfg.get("stationID") or os.path.basename(os.path.dirname(config_path))
@@ -131,6 +164,7 @@ def _station_from_config(config_path):
     camera_group_name = group if group and group.lower() != "none" else None
 
     protocol = (cfg.get("protocol") or "tcp").strip().lower()
+    device_url = (cfg.get("device") or "").strip() or None
 
     return Station(
         station_id=station_id,
@@ -141,6 +175,9 @@ def _station_from_config(config_path):
         log_dir=cfg.get("log_dir", _DEFAULTS["log_dir"]),
         upload_queue_file=cfg.get("upload_queue_file", _DEFAULTS["upload_queue_file"]),
         frame_dir=cfg.get("frame_dir", "FramesFiles"),
+        video_dir=cfg.get("video_dir", "VideoFiles"),
+        raw_video_save=_as_bool(cfg.get("raw_video_save"), default=False),
+        raw_video_duration=_as_float(cfg.get("raw_video_duration"), default=30.0),
         platepar_name=cfg.get("platepar_name", "platepar_cmn2010.cal"),
         camera_group_name=camera_group_name,
         continuous_capture=_as_bool(cfg.get("continuous_capture")),
@@ -154,6 +191,8 @@ def _station_from_config(config_path):
         elevation=elevation,
         capture_wait_seconds=capture_wait_seconds,
         protocol=protocol,
+        device_url=device_url,
+        camera_host=_camera_host(device_url),
     )
 
 

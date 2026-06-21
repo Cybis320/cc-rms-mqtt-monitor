@@ -52,8 +52,20 @@ group: null
 # Empty = all on. Keys: capture_down, capture_stalled, detection_stalled,
 # timelapse_missing, timelapse_overdue, log_fatal, log_warning, watchdog,
 # disk_low, upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames,
-# oom, host_memory, udp_rcvbuf_errors.
+# oom, host_memory, udp_rcvbuf_errors, nic_errors, cpu_pressure.
 disabled_checks: []
+
+# Dropped-frame attribution: each station record carries a drop_cause /
+# drop_confidence / drop_detail derived by elimination from cheap signals --
+# CPU/I-O back-pressure (buffer fill, host CPU/iowait, capture CPU%), the network
+# layers with their own counters (kernel UDP buffer, NIC RX errors, IP reassembly),
+# and in-pipeline decoder corruption with a clean host (the camera/link case).
+# When a station drops frames the host signals can't explain, the monitor
+# self-escalates to a heavy on-demand probe (ffprobe keyframe peak + camera ping)
+# to confirm -- rate-limited and backed off per station so a persistently-bad
+# camera is never re-hammered (important on a Pi). Set false to only run the
+# heavy probe manually via `cc-rms-monitor --diagnose [STATION]`.
+enable_adaptive_probe: true
 
 # Extra WARNING-level log lines to NOT alert on (regex, matched against the
 # line). Added to the built-in benign defaults: ExtractStars "Too many candidate
@@ -78,3 +90,19 @@ thresholds:
   dropped_frames_warn: 10      # dropped frames per 10 min before warning
   mem_available_warn_mb: 800   # host RAM headroom (OOM early warning)
   mem_available_error_mb: 300
+
+  # --- Dropped-frame attribution (classify_drops) + adaptive probe ---
+  # These tune which cause a drop is pinned on, and whether it's host-explained
+  # (no probe) or worth escalating. They don't change alert SEVERITY.
+  buffer_fill_warn_pct: 70       # appsink this full => RMS consumer back-pressure
+  capture_cpu_warn_pct: 250      # capture process-tree CPU% (sums across cores)
+  cpu_busy_warn_pct: 90          # host CPU saturated (back-pressure)
+  cpu_iowait_warn_pct: 20        # host blocked on disk I/O (write back-pressure)
+  load_per_core_warn: 2.0        # run-queue >> cores
+  nic_rx_errors_per_min_warn: 0  # NIC RX errors climbing => wire/cable/duplex
+  ip_reasm_fails_per_min_warn: 0 # IP fragment-reassembly drops climbing
+  decoder_errors_warn: 1         # in-log decoder/concealment errors (upstream loss)
+  pipeline_reconnects_warn: 3    # rtspsrc reconnect churn in the scanned tail
+  ping_loss_warn_pct: 1.0        # probed sustained loss to the camera
+  probe_min_interval_s: 600      # min gap between escalated probes per station
+  probe_max_interval_s: 3600     # backoff ceiling while a camera stays bad

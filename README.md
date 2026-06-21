@@ -25,7 +25,9 @@ Per station, each cycle (default 60 s):
 | **Silent pipeline failure** | capturing fine but **no `FTPdetectinfo`/`CALSTARS`** produced — the general case of "a missing `.so` / import error broke detection but capture looks alive" |
 | **Fatal log errors** | scans the live log for `Traceback`, `ImportError`, `ModuleNotFoundError`, `cannot open shared object file`, `Segmentation fault`, etc., and reports the last one |
 | **Watchdog events** | RMS's own `WATCHDOG: ... died/stale/Restarting` lines |
-| **Dropped frames / buffer fill** | from the periodic `Buffer fill: …%` log line |
+| **Dropped frames / buffer fill** | from the periodic `Buffer fill: …%` log line — and, when frames drop, an attributed **`drop_cause`** (see [Dropped-frame attribution](#dropped-frame-attribution)) |
+| **Pipeline health** | rtspsrc **reconnect churn** and **decoder/concealment errors** counted in the log tail (the symptom of packets lost upstream of decode) |
+| **Capture CPU% & delivered bitrate** | capture process-tree CPU% (`/proc`), and the camera's delivered **Mbps** from raw-video segment size (no decode) — the back-pressure and camera-bandwidth signals |
 | **Disk free** | data partition approaching full |
 | **Upload backlog** | `FILES_TO_UPLOAD.inf` queue length |
 | **Time sync** | `clock_synchronized` / clock uncertainty from the night summary |
@@ -42,6 +44,8 @@ In addition to per-station health, each cycle publishes one **host** record:
 |---|---|
 | **OOM-killer events** | scans the kernel log (`journalctl -k` → `dmesg` → log files) for `Out of memory: Killed process` / `oom-kill:`, reports the count and last victim. A killed `python` (RMS) process is an `error`. |
 | **Memory headroom** | `MemAvailable` / `SwapFree` from `/proc/meminfo` — early warning before the OOM-killer fires |
+| **CPU / I-O pressure** | busy% and **iowait%** (`/proc/stat` delta) + 1-min **load-per-core** (`/proc/loadavg`) — the host-side back-pressure that makes capture drop frames |
+| **NIC errors / IP reassembly** | RX error+drop growth from `/proc/net/dev`, and `Ip.ReasmFails` from `/proc/net/snmp` (UDP only) — packet loss on the wire / from fragmentation, counted in neither `RcvbufErrors` nor the socket |
 | **Uptime** | host uptime |
 
 The agent **protects itself from the OOM-killer** so it survives to report the
@@ -71,10 +75,12 @@ the human-readable text.
 | `upload_backlog` | degraded | upload queue length over threshold (normally drains to 0 each morning; ~4/night when stuck) | `upload_queue_warn` (10) |
 | `clock_unsynced` | degraded | last summary reported clock not synchronized | — |
 | `clock_uncertainty` | degraded | last summary clock error over threshold | `clock_error_warn_ms` (100) |
-| `dropped_frames` | degraded | dropped frames in the last 10 min | `dropped_frames_warn` (10) |
+| `dropped_frames` | degraded | dropped frames in the last 10 min — the alert text names the attributed **cause** (see below) | `dropped_frames_warn` (10) |
 | `oom` | error (python victim) / degraded | host OOM-killer fired (kernel log) | — |
 | `host_memory` | degraded / error | host available memory low / critical | `mem_available_warn_mb` (800) / `..._error_mb` (300) |
 | `udp_rcvbuf_errors` | degraded | host UDP RcvbufErrors growth rate (only when a station uses `protocol: udp`) | `udp_rcvbuf_errors_per_min_warn` (0 = any increase) |
+| `nic_errors` | degraded | host NIC RX error growth (wire/cable/duplex/port) | `nic_rx_errors_per_min_warn` (0 = any increase) |
+| `cpu_pressure` | degraded | host CPU saturated or high I/O wait (back-pressure) | `cpu_busy_warn_pct` (90) / `cpu_iowait_warn_pct` (20) |
 
 Day/night for `capture_stalled` comes from the sun (matching RMS's own switch
 horizon + programmed delays), not from frame creation. Conditional checks stay
@@ -102,6 +108,57 @@ own patterns with `log_warning_ignore` (regex). Genuinely actionable warnings
 > actionable, and the overflowing frames are *skipped* (logging zero stars) — so
 > the logs can't reliably tell a too-low `max_star_candidates` from washout.
 > Rather than alert misleadingly, it's simply suppressed.
+
+## Dropped-frame attribution
+
+When a station drops frames, "dropped frames" alone doesn't say *where*. So the
+monitor attributes each drop to a **cause by elimination** — the same walk you'd
+do by hand — using cheap signals collected every cycle, and adds three fields to
+the station record: **`drop_cause`**, **`drop_confidence`**, **`drop_detail`**.
+The `dropped_frames` alert text carries the cause, e.g.
+*"Dropped 2214 frames in last 10 min — likely camera/link bandwidth (12 decoder
+errors; 9 reconnects; 8.1 Mbps; host clean)"*.
+
+The elimination order (cheapest/strongest first):
+
+| `drop_cause` | Decided by | Signals |
+|---|---|---|
+| `cpu/io back-pressure` | the consumer/host can't keep up | appsink `buffer_fill_pct`, capture process CPU%, host busy%/iowait%, load-per-core |
+| `network: kernel UDP buffer` | socket overflow (raise `rmem_max`) | `udp_rcvbuf_errors_per_min` climbing |
+| `network: NIC/wire` | the link itself shedding packets | `nic_rx_errors_per_min` climbing |
+| `network: IP fragmentation` | fragments lost on reassembly | `ip_reasm_fails_per_min` climbing |
+| `network: link packet loss` | sustained loss to the camera | probed `ping` loss% |
+| `camera/link bandwidth` | damaged input, **host clean** | decoder/concealment errors + reconnects, with delivered Mbps / probed keyframe peak |
+| `uncertain` | real drops, nothing positive yet | → triggers a probe to confirm |
+
+All of the above is `/proc`- and `stat`-cheap, so it runs every cycle even on a
+Pi. The two **heavy** confirmations — `ffprobe` of a recent segment for the
+**keyframe peak**, and a **ping** of the camera — are not run in the loop. They
+escalate **adaptively**: only when a station is dropping frames the host signals
+*can't* explain (the `camera/link bandwidth` / `uncertain` rows), and then at
+most once per `probe_min_interval_s` (10 min), **backing off** by doubling up to
+`probe_max_interval_s` (1 h) while the camera stays bad — so a persistently-bad
+stream is confirmed once, not re-hammered. Set `enable_adaptive_probe: false` to
+disable in-loop probing entirely.
+
+> Why this split: a 270 KB keyframe is ~20 UDP packets in <1 ms — a line-rate
+> microburst a marginal switch port/cable drops *before* the host, invisible to
+> `RcvbufErrors`, NIC counters, and `ping` (paced ICMP isn't a burst). Decoder
+> corruption with every host counter clean is its fingerprint; the delivered
+> bitrate / keyframe peak quantify it. Lowering the camera bitrate shrinks the
+> burst below what the link drops — a workaround — while the real fix is the port/cable.
+
+**On demand:** force the full probe (ignoring the threshold and backoff) and
+print the attribution for one or all stations:
+
+```bash
+python -m cc_mqtt_monitor --diagnose CAWEC4   # one station
+python -m cc_mqtt_monitor --diagnose          # all stations
+```
+
+`ffprobe` (from `ffmpeg`) and `ping` (`iputils-ping`) are used only by the
+probes; if absent, the probe fields are simply null with a note — every cheap
+signal and the loop keep working.
 
 ## Health topics
 
@@ -305,6 +362,10 @@ CC_PURGE=1 ./scripts/uninstall_station.sh
 # Local diagnostics, no broker needed — prints each station's health as JSON:
 python -m cc_mqtt_monitor --status
 
+# Force the deep dropped-frame probe + print the attribution (one or all stations):
+python -m cc_mqtt_monitor --diagnose CAWEC4
+python -m cc_mqtt_monitor --diagnose
+
 # One publish cycle then exit (good for testing the broker connection):
 python -m cc_mqtt_monitor --config config.yaml --once
 
@@ -348,3 +409,6 @@ Run as a service: see `systemd/cc-rms-monitor.service`.
 
 - Python 3.7+
 - `paho-mqtt`, `pyyaml` (installed by `scripts/install.sh`)
+- Optional: `ffmpeg` (for `ffprobe`) and `iputils-ping` — used **only** by the
+  deep dropped-frame probe (`--diagnose` / adaptive escalation). Absent → those
+  probe fields are null; every cheap signal and the loop are unaffected.
