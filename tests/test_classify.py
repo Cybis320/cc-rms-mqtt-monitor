@@ -34,6 +34,17 @@ def test_high_cpu_no_spike_is_not_backpressure():
     assert v["drop_cause"] != health.CAUSE_BACKPRESSURE
 
 
+def test_spike_with_reconnects_is_not_backpressure():
+    # Every fresh (re)connection produces a startup buffer spike; when it rides
+    # with reconnect churn it's a connection transient, NOT back-pressure -- it
+    # must read as camera/link (the camera dropping the stream).
+    m = {"dropped_frames_10min": 1746, "buffer_fill_max_recent": 51.6,
+         "pipeline_reconnects": 12, "decoder_errors": 9}
+    v = health.classify_drops(m, {"cpu_busy_pct": 30.0}, T)
+    assert v["drop_cause"] == health.CAUSE_CAMERA_BW
+    assert "reconnect" in v["drop_detail"]
+
+
 def test_flat_fill_decoder_errors_is_camera():
     # CAWEC4: flat fill (no spike), decoder corruption, host clean -> camera/link.
     m = {"dropped_frames_10min": 2214, "buffer_fill_max_recent": 11.0,

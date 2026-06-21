@@ -99,8 +99,14 @@ def classify_drops(metrics, host_metrics, thresholds):
     #    the 10-min count logs). CPU% is deliberately NOT a trigger -- a busy Pi
     #    runs hot whether or not it drops, so the spike is the discriminator; CPU/
     #    iowait appear only as context to hint cpu- vs disk-bound.
+    #    BUT: every fresh (re)connection produces a brief startup buffer-fill
+    #    spike, so a spike riding WITH reconnect churn is that transient, not
+    #    back-pressure -- only trust the spike on a stable (non-reconnecting)
+    #    stream, else fall through to the camera/link verdict below.
     spike = _num(metrics, "buffer_fill_max_recent")
-    if _hot(spike, thresholds.buffer_fill_spike_pct):
+    reconnects = metrics.get("pipeline_reconnects") or 0
+    stable = reconnects < thresholds.pipeline_reconnects_warn
+    if _hot(spike, thresholds.buffer_fill_spike_pct) and stable:
         ctx = []
         cpu_busy = _num(h, "cpu_busy_pct")
         iowait = _num(h, "cpu_iowait_pct")
@@ -133,20 +139,22 @@ def classify_drops(metrics, host_metrics, thresholds):
     if _hot(ping_loss, thresholds.ping_loss_warn_pct):
         return verdict(CAUSE_LINK_LOSS, "high", "ping loss %.0f%% to camera" % ping_loss)
 
-    # 4) In-pipeline corruption with the host clean: packets are arriving damaged
-    #    (lost upstream of decode) though no host counter moved -- the link/camera
-    #    microburst case. Decoder errors / reconnect churn are the symptom;
-    #    delivered bitrate (cheap) or a probed keyframe peak adds the detail.
+    # 4) Camera/link: either the stream keeps DROPPING (reconnect loop -- the
+    #    camera/connection won't stay up) or it stays up but arrives DAMAGED
+    #    (decoder corruption from packets lost upstream, the microburst case),
+    #    with the host clean. Reconnect churn vs decoder errors tells them apart;
+    #    delivered bitrate / a probed keyframe peak adds the bandwidth detail.
     decoder_err = metrics.get("decoder_errors") or 0
-    reconnects = metrics.get("pipeline_reconnects") or 0
     host_known = any(_num(h, k) is not None for k in
                      ("cpu_busy_pct", "nic_rx_errors_per_min"))
     if decoder_err >= thresholds.decoder_errors_warn or reconnects >= thresholds.pipeline_reconnects_warn:
         detail = []
+        if reconnects >= thresholds.pipeline_reconnects_warn:
+            detail.append("%d reconnects (camera dropping the stream)" % reconnects)
+        elif reconnects:
+            detail.append("%d reconnects" % reconnects)
         if decoder_err:
             detail.append("%d decoder errors" % decoder_err)
-        if reconnects:
-            detail.append("%d reconnects" % reconnects)
         peak = _num(metrics, "probe_keyframe_peak_kb")
         mbps = _num(metrics, "probe_stream_mbps") or _num(metrics, "stream_mbps")
         if peak is not None:
