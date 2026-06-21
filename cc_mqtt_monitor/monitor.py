@@ -9,6 +9,7 @@ from .collect import collect_station, rms_branch, rms_behind
 from .oslevel import collect_host
 from .health import build_state, build_host_state
 from . import maintenance
+from . import diagnose
 
 log = logging.getLogger("cc_mqtt_monitor")
 
@@ -53,9 +54,11 @@ def _consenting_stations(config):
             if _publishable(s)]
 
 
-def gather(config, maint=None):
+def gather(config, maint=None, host_metrics=None):
     """Discover stations and build a state dict for each (no MQTT involved).
-    `maint` is the (bool, reason) maintenance tuple; computed if not passed."""
+    `maint` is the (bool, reason) maintenance tuple; computed if not passed.
+    `host_metrics` is this cycle's host record, passed to the drop classifier so
+    a station drop can be attributed using host-wide CPU/NIC/UDP signals."""
     stations = _consenting_stations(config)
     disabled = set(config.disabled_checks or [])
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
@@ -66,7 +69,17 @@ def gather(config, maint=None):
     for station in stations:
         metrics = collect_station(station, config.log_tail_lines, now,
                                   config.log_warning_ignore)
-        state = build_state(metrics, config.thresholds, config.host_name, _iso(now), disabled)
+        # Adaptive escalation: when this station is dropping frames the cheap
+        # host signals can't explain, spend a heavy probe (keyframe + ping) to
+        # confirm the camera/link verdict -- rate-limited/backed-off per station.
+        if config.enable_adaptive_probe and diagnose.should_escalate(
+                station, metrics, host_metrics, config.thresholds):
+            log.info("%s: drops unexplained on host; running diagnostic probe",
+                     station.station_id)
+            metrics.update(diagnose.run_probe(station, now))
+            diagnose.note_escalation(station, config.thresholds)
+        state = build_state(metrics, config.thresholds, config.host_name,
+                            _iso(now), disabled, host_metrics)
         group = _station_group(station, config)
         state["group"] = group               # human-readable label
         state["group_slug"] = _slug(group)   # canonical subscription handle
@@ -113,6 +126,29 @@ def gather_host(config, maint=None):
     state["maintenance"] = maint
     state["maintenance_reason"] = maint_reason
     return state
+
+
+def run_diagnose(config, station_id=None):
+    """Force the heavy probe on one (or all) station(s) and return enriched
+    state(s) -- the manual counterpart to the loop's adaptive escalation. Unlike
+    the loop it ignores the drop threshold and the per-station backoff, so it
+    always probes now. No MQTT; used by the `--diagnose` CLI."""
+    stations = _consenting_stations(config)
+    if station_id:
+        stations = [s for s in stations
+                    if s.station_id.lower() == station_id.lower()]
+    host_state = gather_host(config)
+    disabled = set(config.disabled_checks or [])
+    now = time.time()
+    reports = []
+    for station in stations:
+        metrics = collect_station(station, config.log_tail_lines, now,
+                                  config.log_warning_ignore)
+        metrics.update(diagnose.run_probe(station, now))   # force, no gating
+        state = build_state(metrics, config.thresholds, config.host_name,
+                            _iso(now), disabled, host_state)
+        reports.append(state)
+    return host_state, reports
 
 
 def make_test_state(config):
@@ -183,7 +219,9 @@ def run_once(config, publisher=None):
         if publisher:
             publisher.publish_host_state(host_state)
 
-    states = gather(config, maint)
+    # Pass the host record into station evaluation so the drop classifier can use
+    # host-wide CPU/NIC/UDP signals to attribute a per-station drop.
+    states = gather(config, maint, host_state)
     for state in states:
         log.info("%s: %s %s", state["station_id"], state["status"],
                  ("- " + "; ".join(state["problems"])) if state["problems"] else "")

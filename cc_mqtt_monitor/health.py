@@ -37,7 +37,133 @@ CHECK_KEYS = (
     "oom",                # host OOM-killer fired
     "host_memory",        # host available memory low / critically low
     "udp_rcvbuf_errors",  # host UDP receive-buffer overflows climbing (udp RTSP)
+    "nic_errors",         # host NIC RX errors climbing (wire/link)
+    "cpu_pressure",       # host CPU saturated / high iowait (back-pressure)
 )
+
+
+# Drop-cause labels (also the public `drop_cause` values on a station record).
+CAUSE_BACKPRESSURE = "cpu/io back-pressure"
+CAUSE_UDP_BUFFER = "network: kernel UDP buffer"
+CAUSE_NIC = "network: NIC/wire"
+CAUSE_IP_FRAG = "network: IP fragmentation"
+CAUSE_LINK_LOSS = "network: link packet loss"
+CAUSE_CAMERA_BW = "camera/link bandwidth"
+CAUSE_UNCERTAIN = "uncertain"
+
+
+def _num(metrics, key):
+    """A metric as float, or None if absent/non-numeric (defensive: a collector
+    that couldn't read a signal leaves it null, which must not count as 0)."""
+    val = metrics.get(key)
+    try:
+        return float(val) if val is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _hot(value, threshold):
+    return value is not None and value > threshold
+
+
+def classify_drops(metrics, host_metrics, thresholds):
+    """Attribute a dropped-frame burst to a probable cause by elimination.
+
+    This is the by-hand CAWEC4 logic encoded: walk the stack cheapest/strongest
+    first -- back-pressure (the consumer can't keep up), then each network layer
+    that has its OWN positive counter (kernel UDP buffer, NIC, IP fragmentation),
+    then in-pipeline decoder corruption with a clean host (the camera/link-burst
+    signature), else uncertain. Host signals are host-wide; the per-station
+    pipeline signals disambiguate which camera. Returns drop_cause/-confidence/
+    -detail, all None when there's no drop to explain.
+
+    `host_metrics` may be empty (e.g. a host with no consenting stations); then
+    only per-station signals are used and confidence is reduced accordingly.
+    Probe results (probe_ping_loss_pct, probe_keyframe_peak_kb), when present,
+    sharpen the verdict but are never required.
+    """
+    none = {"drop_cause": None, "drop_confidence": None, "drop_detail": None}
+    dropped = metrics.get("dropped_frames_10min")
+    if not dropped or dropped < thresholds.dropped_frames_warn:
+        return none
+
+    h = host_metrics or {}
+
+    def verdict(cause, confidence, detail):
+        return {"drop_cause": cause, "drop_confidence": confidence,
+                "drop_detail": detail}
+
+    # 1) CPU / I-O back-pressure: the consumer (appsink) or the host is the
+    #    bottleneck. The appsink filling is the most specific per-station tell.
+    fill = _num(metrics, "buffer_fill_pct")
+    cpu_proc = _num(metrics, "capture_cpu_pct")
+    cpu_busy = _num(h, "cpu_busy_pct")
+    iowait = _num(h, "cpu_iowait_pct")
+    load = _num(h, "load_per_core")
+    if _hot(fill, thresholds.buffer_fill_warn_pct):
+        return verdict(CAUSE_BACKPRESSURE, "high", "appsink buffer %.0f%% full" % fill)
+    if (_hot(cpu_proc, thresholds.capture_cpu_warn_pct)
+            or _hot(cpu_busy, thresholds.cpu_busy_warn_pct)
+            or _hot(iowait, thresholds.cpu_iowait_warn_pct)
+            or _hot(load, thresholds.load_per_core_warn)):
+        bits = []
+        if cpu_busy is not None:
+            bits.append("host cpu %.0f%%" % cpu_busy)
+        if iowait is not None:
+            bits.append("iowait %.0f%%" % iowait)
+        if cpu_proc is not None:
+            bits.append("capture %.0f%%" % cpu_proc)
+        if load is not None:
+            bits.append("load/core %.1f" % load)
+        return verdict(CAUSE_BACKPRESSURE, "high", ", ".join(bits) or "host busy")
+
+    # 2) Network layers with their own positive counter (host-wide rates).
+    if _hot(_num(h, "udp_rcvbuf_errors_per_min"), thresholds.udp_rcvbuf_errors_per_min_warn):
+        return verdict(CAUSE_UDP_BUFFER, "high",
+                       "UDP RcvbufErrors +%.0f/min (raise rmem_max)"
+                       % _num(h, "udp_rcvbuf_errors_per_min"))
+    if _hot(_num(h, "nic_rx_errors_per_min"), thresholds.nic_rx_errors_per_min_warn):
+        return verdict(CAUSE_NIC, "high", "NIC RX errors +%.0f/min (cable/duplex/port)"
+                       % _num(h, "nic_rx_errors_per_min"))
+    if _hot(_num(h, "ip_reasm_fails_per_min"), thresholds.ip_reasm_fails_per_min_warn):
+        return verdict(CAUSE_IP_FRAG, "high", "IP reasm fails +%.0f/min"
+                       % _num(h, "ip_reasm_fails_per_min"))
+
+    # 3) A confirming probe, if one has been attached, is decisive.
+    ping_loss = _num(metrics, "probe_ping_loss_pct")
+    if _hot(ping_loss, thresholds.ping_loss_warn_pct):
+        return verdict(CAUSE_LINK_LOSS, "high", "ping loss %.0f%% to camera" % ping_loss)
+
+    # 4) In-pipeline corruption with the host clean: packets are arriving damaged
+    #    (lost upstream of decode) though no host counter moved -- the link/camera
+    #    microburst case. Decoder errors / reconnect churn are the symptom;
+    #    delivered bitrate (cheap) or a probed keyframe peak adds the detail.
+    decoder_err = metrics.get("decoder_errors") or 0
+    reconnects = metrics.get("pipeline_reconnects") or 0
+    host_known = any(_num(h, k) is not None for k in
+                     ("cpu_busy_pct", "nic_rx_errors_per_min"))
+    if decoder_err >= thresholds.decoder_errors_warn or reconnects >= thresholds.pipeline_reconnects_warn:
+        detail = []
+        if decoder_err:
+            detail.append("%d decoder errors" % decoder_err)
+        if reconnects:
+            detail.append("%d reconnects" % reconnects)
+        peak = _num(metrics, "probe_keyframe_peak_kb")
+        mbps = _num(metrics, "probe_stream_mbps") or _num(metrics, "stream_mbps")
+        if peak is not None:
+            detail.append("keyframe peak %.0f KB" % peak)
+        if mbps is not None:
+            detail.append("%.1f Mbps" % mbps)
+        if host_known:
+            detail.append("host clean")
+        # Confidence is higher once a probe corroborated it (peak/ping present).
+        conf = "high" if peak is not None else ("medium" if host_known else "low")
+        return verdict(CAUSE_CAMERA_BW, conf, "; ".join(detail))
+
+    # 5) Nothing positive yet -- real drops, host looks clean, no decoder symptom
+    #    captured in the tail. This is exactly when escalating to a probe pays off.
+    return verdict(CAUSE_UNCERTAIN, "low",
+                   "drops with no host signal; probe to confirm camera/link")
 
 
 def _worse(a, b):
@@ -169,10 +295,16 @@ def evaluate(metrics, thresholds, disabled=()):
             pass
 
     # --- Dropped frames (a few are normal; warn only past the threshold) -
+    # The attribution (drop_cause/-detail) is computed in build_state and merged
+    # into metrics, so the alert says *why*, not just that frames dropped.
     dropped = metrics.get("dropped_frames_10min") or 0
     if dropped >= thresholds.dropped_frames_warn:
-        flag(DEGRADED, "dropped_frames",
-             "Dropped %d frames in last 10 min" % dropped)
+        msg = "Dropped %d frames in last 10 min" % dropped
+        cause = metrics.get("drop_cause")
+        if cause:
+            detail = metrics.get("drop_detail")
+            msg += " -- likely %s%s" % (cause, (" (%s)" % detail) if detail else "")
+        flag(DEGRADED, "dropped_frames", msg)
 
     return state["status"], state["problems"]
 
@@ -208,11 +340,35 @@ def evaluate_host(metrics, thresholds, disabled=()):
              % (rate, metrics.get("udp_rcvbuf_errors"),
                 metrics.get("udp_rcvbuf_error_pct") or 0.0))
 
+    # NIC RX errors climbing: the wire/link itself shedding packets (a cable,
+    # duplex mismatch, or dying port) -- distinct from a full socket buffer.
+    nic_rate = metrics.get("nic_rx_errors_per_min")
+    if nic_rate is not None and nic_rate > thresholds.nic_rx_errors_per_min_warn:
+        flag(DEGRADED, "nic_errors",
+             "NIC RX errors climbing: %.1f/min (%s total)"
+             % (nic_rate, metrics.get("nic_rx_errors")))
+
+    # Sustained CPU saturation / disk-I-O wait: the host-side back-pressure that
+    # makes capture consumers drop frames. iowait is the disk-write signal.
+    busy = metrics.get("cpu_busy_pct")
+    iowait = metrics.get("cpu_iowait_pct")
+    if busy is not None and busy > thresholds.cpu_busy_warn_pct:
+        flag(DEGRADED, "cpu_pressure", "Host CPU %.0f%% busy" % busy)
+    elif iowait is not None and iowait > thresholds.cpu_iowait_warn_pct:
+        flag(DEGRADED, "cpu_pressure", "Host I/O wait %.0f%%" % iowait)
+
     return state["status"], state["problems"]
 
 
-def build_state(metrics, thresholds, host_name, timestamp, disabled=()):
-    """Assemble the published JSON state for one station."""
+def build_state(metrics, thresholds, host_name, timestamp, disabled=(), host_metrics=None):
+    """Assemble the published JSON state for one station.
+
+    `host_metrics` (the same cycle's host record) lets the drop classifier use
+    host-wide signals (CPU, NIC, UDP, reassembly) to attribute a drop; it's
+    optional, so callers without a host record still get per-station attribution.
+    """
+    metrics = dict(metrics)
+    metrics.update(classify_drops(metrics, host_metrics, thresholds))
     status, problems = evaluate(metrics, thresholds, disabled)
     state = dict(metrics)
     state["status"] = status
