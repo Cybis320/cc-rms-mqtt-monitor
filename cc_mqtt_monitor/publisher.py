@@ -12,14 +12,15 @@ import json
 import paho.mqtt.client as mqtt
 
 
-def _make_client(client_id):
+def _make_client(client_id, transport="tcp"):
     """Construct a paho Client across the 1.x / 2.x API split."""
     try:
         # paho-mqtt >= 2.0
-        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=client_id)
+        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=client_id,
+                           transport=transport)
     except (AttributeError, TypeError):
         # paho-mqtt 1.x
-        return mqtt.Client(client_id=client_id)
+        return mqtt.Client(client_id=client_id, transport=transport)
 
 
 class Publisher:
@@ -34,7 +35,11 @@ class Publisher:
         client_id = "%s-%s" % (config.broker.client_id_prefix, config.host_name)
         if not announce:
             client_id += "-test"
-        self.client = _make_client(client_id)
+        self.client = _make_client(client_id, config.broker.transport)
+        if config.broker.transport == "websockets":
+            # Path of the broker's WebSocket listener (e.g. mosquitto's
+            # "http_dir"/listener path). Lets MQTT ride 443 like HTTPS.
+            self.client.ws_set_options(path=config.broker.ws_path)
         if config.broker.username:
             self.client.username_pw_set(
                 config.broker.username, config.broker.password)

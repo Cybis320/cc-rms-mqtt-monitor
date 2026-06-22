@@ -33,6 +33,12 @@ class BrokerConfig:
     tls: bool = False
     keepalive: int = 60
     client_id_prefix: str = "cc-rms-monitor"
+    # Transport: "tcp" (default, port 1883) or "websockets". Use websockets when
+    # a restrictive network (e.g. a school) blocks 1883 but allows 443 -- point
+    # at the broker's WSS endpoint with: transport: websockets, port: 443,
+    # tls: true, ws_path: /mqtt. MQTT-over-WSS looks like HTTPS and passes through.
+    transport: str = "tcp"
+    ws_path: str = "/mqtt"
 
 
 @dataclass

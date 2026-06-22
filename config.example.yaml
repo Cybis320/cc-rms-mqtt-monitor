@@ -12,6 +12,14 @@ broker:
                           # see deploy/README.md.
   keepalive: 60
   client_id_prefix: cc-rms-monitor
+  transport: tcp           # "tcp" (port 1883) normally. On a restricted network
+                           # (e.g. a school) that blocks 1883 but allows 443, use
+                           # MQTT-over-WebSockets, which looks like HTTPS:
+                           #   transport: websockets
+                           #   port: 443
+                           #   tls: true
+                           #   ws_path: /mqtt   (must match the broker's WS path)
+  ws_path: /mqtt
 
 # How stations are discovered:
 #   multicam  -> one station per <stations_dir>/*/.config
