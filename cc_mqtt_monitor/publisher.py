@@ -40,7 +40,7 @@ class Publisher:
         if not announce:
             self._client_id += "-test"
         self._pending = []
-        self._using_fallback = False
+        self._winning_broker = None   # set to a fallback endpoint once one works
         self._build_client(config.broker)
 
     def _build_client(self, broker):
@@ -60,15 +60,22 @@ class Publisher:
             # Re-assert "online" on every (re)connect (see _on_connect).
             self.client.on_connect = self._on_connect
 
-    def _fallback_broker(self):
-        """A WebSocket(/TLS)-on-fallback_port variant of the primary broker, for
-        networks that block 1883 but allow 443 (WSS looks like HTTPS)."""
-        b = copy.copy(self.config.broker)
-        b.transport = "websockets"
-        b.port = self.config.broker.fallback_port
-        b.tls = self.config.broker.fallback_tls
-        b.ws_path = self.config.broker.fallback_ws_path
-        return b
+    def _fallback_brokers(self):
+        """Broker variants for each configured fallback endpoint (same host/creds),
+        tried in order when the primary fails (e.g. wss/443, then mqtts/8883)."""
+        out = []
+        for f in (self.config.broker.fallbacks or []):
+            b = copy.copy(self.config.broker)
+            b.transport = f.get("transport", "tcp")
+            b.port = f.get("port")
+            b.tls = f.get("tls", False)
+            b.ws_path = f.get("ws_path", b.ws_path)
+            out.append(b)
+        return out
+
+    @staticmethod
+    def _endpoint_label(b):
+        return "%s:%s/%s%s" % (b.host, b.port, b.transport, "+tls" if b.tls else "")
 
     def _on_connect(self, client, userdata, flags, rc, *args):
         # Republish "online" on every successful (re)connect, so the status topic
@@ -86,35 +93,38 @@ class Publisher:
         # connect and on every automatic reconnect.
 
     def connect(self):
-        """Connect, auto-falling back to WebSockets/443 if the primary fails.
+        """Connect, trying fallback endpoints in order if the primary fails.
 
-        A station behind a firewall that blocks 1883 but allows 443 connects with
-        no config change. We stick to the fallback for the rest of the session
-        only after it actually succeeds, so a transient 1883 hiccup doesn't lock a
-        normal station onto WSS."""
-        if self._using_fallback:
-            self._build_client(self._fallback_broker())
-            self._connect_to(self._fallback_broker())
+        Lets a station behind a firewall (e.g. a school) that blocks 1883 connect
+        with no config change -- via wss/443 or mqtts/8883. The first endpoint
+        that works sticks for the session, so a transient primary hiccup doesn't
+        lock a normal station onto a fallback, and a confirmed fallback isn't
+        re-probed every cycle."""
+        if self._winning_broker is not None:
+            self._build_client(self._winning_broker)
+            self._connect_to(self._winning_broker)
             return
 
-        primary = self.config.broker
-        self._build_client(primary)
-        try:
-            self._connect_to(primary)
-            return
-        except Exception as exc:
-            if not (primary.auto_fallback and primary.transport == "tcp"):
-                raise
-            log.warning("Broker connect to %s:%d (%s) failed: %s; trying WebSocket "
-                        "fallback on :%d", primary.host, primary.port,
-                        primary.transport, exc, primary.fallback_port)
+        attempts = [self.config.broker]
+        if self.config.broker.auto_fallback and self.config.broker.transport == "tcp":
+            attempts += self._fallback_brokers()
 
-        fb = self._fallback_broker()
-        self._build_client(fb)
-        self._connect_to(fb)            # raises -> propagates to caller's retry/backoff
-        self._using_fallback = True     # stick only after a successful WSS connect
-        log.info("Connected to %s:%d over WebSockets; using it for this session",
-                 fb.host, fb.port)
+        last_exc = None
+        for i, b in enumerate(attempts):
+            self._build_client(b)
+            try:
+                self._connect_to(b)
+                if i > 0:   # a fallback won -> remember it for the session
+                    self._winning_broker = b
+                    log.info("Connected via fallback %s; using it for this session",
+                             self._endpoint_label(b))
+                return
+            except Exception as exc:
+                last_exc = exc
+                more = "trying next" if i < len(attempts) - 1 else "no endpoints left"
+                log.warning("Broker connect %s failed: %s; %s",
+                            self._endpoint_label(b), exc, more)
+        raise last_exc            # all endpoints failed -> caller retries/backs off
 
     def _state_topic(self, station_id):
         return "%s/%s/health" % (self.config.topic_prefix, station_id)

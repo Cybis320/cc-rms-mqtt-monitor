@@ -246,8 +246,10 @@ def _connect_with_retry(config, publisher):
             publisher.connect()
             return
         except Exception as exc:
-            log.warning("Broker connect to %s:%d failed (%s); retrying in %ds",
-                        config.broker.host, config.broker.port, exc, backoff)
+            # publisher.connect() already logged each endpoint it tried; this is
+            # the all-endpoints-exhausted retry (don't name a single port here).
+            log.warning("Broker unreachable on all endpoints (%s); retrying in %ds",
+                        exc, backoff)
             time.sleep(backoff)
             backoff = min(backoff * 2, 60)
 

@@ -37,16 +37,18 @@ class BrokerConfig:
     # tcp and rely on auto_fallback below; set it explicitly only to FORCE WSS.
     transport: str = "tcp"
     ws_path: str = "/mqtt"
-    # Auto-fallback: if the primary (TCP/1883) connect fails, transparently retry
-    # over WebSockets on fallback_port -- so a station behind a firewall that
-    # blocks 1883 but allows 443 connects with NO config change. TLS by default
-    # (wss): on 443, traversal through school proxies effectively requires a real
-    # TLS handshake; it's for firewall traversal, not data secrecy. The fallback
-    # sticks for the session only after it actually connects.
+    # Auto-fallback: if the primary (TCP/1883) connect fails, try these endpoints
+    # in order -- so a station behind a firewall connects with NO per-station
+    # config. Defaults cover the ports restrictive networks usually leave open:
+    # wss/443 (looks like HTTPS) and mqtts/8883 (standard MQTT-over-TLS). TLS here
+    # is for firewall traversal, not data secrecy. The first endpoint that works
+    # sticks for the session (no re-probing each cycle; a transient primary hiccup
+    # doesn't lock a normal station onto a fallback -- it only sticks on success).
     auto_fallback: bool = True
-    fallback_port: int = 443
-    fallback_tls: bool = True
-    fallback_ws_path: str = "/mqtt"
+    fallbacks: list = field(default_factory=lambda: [
+        {"transport": "websockets", "port": 443, "tls": True, "ws_path": "/mqtt"},
+        {"transport": "tcp", "port": 8883, "tls": True},
+    ])
 
 
 @dataclass

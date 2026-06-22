@@ -13,14 +13,14 @@ broker:
   keepalive: 60
   client_id_prefix: cc-rms-monitor
   # Connectivity is automatic: try TCP/1883 first, and if that's blocked (e.g. a
-  # school firewall) transparently fall back to MQTT-over-WebSockets on 443,
-  # which looks like HTTPS and passes through. No per-station change needed.
-  auto_fallback: true      # set false to disable the 443 fallback entirely
-  fallback_port: 443
-  fallback_tls: true       # wss:// -- 443 traversal generally needs a real TLS
-                           # handshake (for firewall traversal, not data secrecy)
-  fallback_ws_path: /mqtt  # must match the broker's WebSocket listener path
-  # To FORCE WebSockets (skip the TCP probe), instead set:
+  # school firewall) fall back through these endpoints in order until one works
+  # -- wss/443 (looks like HTTPS) then mqtts/8883 (standard MQTT-TLS). The first
+  # that connects sticks for the session. No per-station change needed.
+  auto_fallback: true      # set false to disable all fallbacks
+  fallbacks:
+    - {transport: websockets, port: 443,  tls: true, ws_path: /mqtt}
+    - {transport: tcp,        port: 8883, tls: true}
+  # To FORCE one transport (skip the TCP probe), instead set the primary directly:
   #   transport: websockets, port: 443, tls: true, ws_path: /mqtt
   transport: tcp
   ws_path: /mqtt
