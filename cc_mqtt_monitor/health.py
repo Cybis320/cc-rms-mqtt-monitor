@@ -25,6 +25,7 @@ CHECK_KEYS = (
     "capture_stalled",    # no FF (night) / no frames (day) within the threshold
     "detection_stalled",  # capturing but no FTPdetectinfo/CALSTARS produced
     "platepar_mismatch",  # config resolution != platepar -> RMS drops the platepar
+    "config_fov_mismatch", # config fov_w can't solve the real FOV (astrometry.net)
     "timelapse_missing",  # a finished frame session's ffmpeg failed (no mp4)
     "timelapse_overdue",  # saving frames but no timelapse mp4 produced in ages
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
@@ -238,6 +239,16 @@ def evaluate(metrics, thresholds, disabled=()):
              "Platepar resolution %sx%s != config %sx%s -- RMS discards the platepar, "
              "no astrometry" % (metrics.get("platepar_x_res"), metrics.get("platepar_y_res"),
                                 metrics.get("config_width"), metrics.get("config_height")))
+
+    # --- Config FOV outside astrometry.net's solve range (latent) --------
+    # config.fov_w is the scale hint for auto-calibration (searches [0.75x,1.5x]).
+    # If the real FOV (platepar fov_h) is outside that, a fresh plate-solve fails
+    # -> no recalibration. Degraded: an existing platepar still works for now.
+    if metrics.get("config_fov_mismatch"):
+        flag(DEGRADED, "config_fov_mismatch",
+             "Config fov_w=%s deg can't solve the actual FOV (~%s deg): outside "
+             "astrometry.net's 0.75-1.5x range -- a fresh auto-calibration would fail"
+             % (metrics.get("config_fov_w"), metrics.get("platepar_fov_h")))
 
     # --- Silent pipeline failure (the ".so missing" class) ---------------
     if (

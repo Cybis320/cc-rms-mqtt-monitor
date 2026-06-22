@@ -239,6 +239,16 @@ def collect_platepar(station):
             result["config_height"] = station.config_height
             result["platepar_res_mismatch"] = (
                 int(xr) != station.config_width or int(yr) != station.config_height)
+
+    # Config FOV sanity vs the fitted horizontal FOV: astrometry.net only searches
+    # [0.75x, 1.5x] of config.fov_w, so if the real FOV is outside that window a
+    # fresh auto-calibration would fail. Mirror RMS's own range (no arbitrary tol).
+    fov_h = pp.get("fov_h")   # platepar fov_h is the horizontal FOV (deg)
+    if isinstance(fov_h, (int, float)) and station.config_fov_w > 0:
+        result["platepar_fov_h"] = round(fov_h, 1)
+        result["config_fov_w"] = station.config_fov_w
+        result["config_fov_mismatch"] = not (
+            0.75 * station.config_fov_w <= fov_h <= 1.5 * station.config_fov_w)
     return result
 
 

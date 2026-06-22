@@ -66,6 +66,11 @@ class Station:
     # mismatch vs the platepar X_res/Y_res is a silent, data-killing failure.
     config_width: int = 0
     config_height: int = 0
+    # Approximate FOV from the .config -- the scale hint astrometry.net uses for
+    # auto-calibration (it searches [0.75x, 1.5x] fov_w). If the real FOV is
+    # outside that window a fresh plate-solve fails -> no (re)calibration.
+    config_fov_w: float = 0.0
+    config_fov_h: float = 0.0
     # The camera's RTSP URL and the host/IP parsed from it (for the on-demand
     # network/keyframe probes). None when the device isn't an rtsp:// URL
     # (e.g. a v4l2 device index), in which case those probes are skipped.
@@ -172,6 +177,8 @@ def _station_from_config(config_path):
     device_url = (cfg.get("device") or "").strip() or None
     config_width = int(_as_float(cfg.get("width")))
     config_height = int(_as_float(cfg.get("height")))
+    config_fov_w = _as_float(cfg.get("fov_w"))
+    config_fov_h = _as_float(cfg.get("fov_h"))
 
     return Station(
         station_id=station_id,
@@ -195,6 +202,8 @@ def _station_from_config(config_path):
         weblog_enable=_as_bool(cfg.get("weblog_enable"), default=True),
         config_width=config_width,
         config_height=config_height,
+        config_fov_w=config_fov_w,
+        config_fov_h=config_fov_h,
         latitude=latitude,
         longitude=longitude,
         elevation=elevation,
