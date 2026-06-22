@@ -435,6 +435,10 @@ _FATAL_PATTERNS = [
 _WATCHDOG_RE = re.compile(r"WATCHDOG:.*(died|stale|Restarting)", re.IGNORECASE)
 # RMS log level field, e.g. "2026/06/20 03:08:33-WARNING-BufferedCapture-line:..".
 _WARNING_RE = re.compile(r"-WARNING-")
+# RMS's actual day/night mode: the in-process `daytime_mode` flag, logged every
+# ~60s by the capture watchdog ("daytime_mode_prev=True/False"). This is the only
+# mode signal independent of save_frames/raw saving, so it's the ground truth.
+_DAYTIME_MODE_RE = re.compile(r"daytime_mode_prev=(True|False)")
 
 # Benign, high-volume RMS warnings ignored by default: computational artifacts
 # or self-recovering races, not operational problems. Operators add more via
@@ -564,6 +568,7 @@ def collect_logs(station, max_lines, warning_ignore=None):
         "dropped_frames_session": None,
         "pipeline_reconnects": 0,
         "decoder_errors": 0,
+        "rms_mode": None,   # RMS's actual day/night mode (ground truth, see below)
     }
     log_path = _newest_log(station)
     if not log_path:
@@ -609,6 +614,12 @@ def collect_logs(station, max_lines, warning_ignore=None):
             result["pipeline_reconnects"] += 1
         elif _DECODER_ERR_RE.search(line):
             result["decoder_errors"] += 1
+
+        # RMS's actual day/night mode (ground truth from the in-process flag).
+        # Lines are chronological, so the last match in the tail is the newest.
+        mode = _DAYTIME_MODE_RE.search(line)
+        if mode:
+            result["rms_mode"] = "day" if mode.group(1) == "True" else "night"
 
     # Peak buffer fill in the recent window -- the back-pressure signal, since the
     # fill at the drop line has usually recovered to baseline. Prefer the
