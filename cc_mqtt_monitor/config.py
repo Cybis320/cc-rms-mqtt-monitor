@@ -33,12 +33,20 @@ class BrokerConfig:
     tls: bool = False
     keepalive: int = 60
     client_id_prefix: str = "cc-rms-monitor"
-    # Transport: "tcp" (default, port 1883) or "websockets". Use websockets when
-    # a restrictive network (e.g. a school) blocks 1883 but allows 443 -- point
-    # at the broker's WSS endpoint with: transport: websockets, port: 443,
-    # tls: true, ws_path: /mqtt. MQTT-over-WSS looks like HTTPS and passes through.
+    # Transport: "tcp" (default, port 1883) or "websockets". Normally leave this
+    # tcp and rely on auto_fallback below; set it explicitly only to FORCE WSS.
     transport: str = "tcp"
     ws_path: str = "/mqtt"
+    # Auto-fallback: if the primary (TCP/1883) connect fails, transparently retry
+    # over WebSockets on fallback_port -- so a station behind a firewall that
+    # blocks 1883 but allows 443 connects with NO config change. TLS by default
+    # (wss): on 443, traversal through school proxies effectively requires a real
+    # TLS handshake; it's for firewall traversal, not data secrecy. The fallback
+    # sticks for the session only after it actually connects.
+    auto_fallback: bool = True
+    fallback_port: int = 443
+    fallback_tls: bool = True
+    fallback_ws_path: str = "/mqtt"
 
 
 @dataclass
