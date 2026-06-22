@@ -226,6 +226,19 @@ def collect_platepar(station):
         val = pp.get(key)
         if isinstance(val, (int, float)):
             result[key] = round(val)
+
+    # Resolution reconciliation: RMS discards the platepar (no astrometry) if the
+    # .config width/height differ from the platepar X_res/Y_res. Publish both and
+    # a strict-mismatch flag so health can surface this silent data-killer.
+    xr, yr = pp.get("X_res"), pp.get("Y_res")
+    if isinstance(xr, (int, float)) and isinstance(yr, (int, float)):
+        result["platepar_x_res"] = int(xr)
+        result["platepar_y_res"] = int(yr)
+        if station.config_width and station.config_height:
+            result["config_width"] = station.config_width
+            result["config_height"] = station.config_height
+            result["platepar_res_mismatch"] = (
+                int(xr) != station.config_width or int(yr) != station.config_height)
     return result
 
 

@@ -61,6 +61,11 @@ class Station:
     # RTSP transport ("tcp"/"udp"). UDP can overflow the kernel receive buffer
     # (RcvbufErrors), which we monitor host-wide when any station uses it.
     protocol: str = "tcp"
+    # Camera resolution from the .config. RMS DISCARDS the platepar entirely if it
+    # was fit at a different resolution (no astrometry for that night) -- so a
+    # mismatch vs the platepar X_res/Y_res is a silent, data-killing failure.
+    config_width: int = 0
+    config_height: int = 0
     # The camera's RTSP URL and the host/IP parsed from it (for the on-demand
     # network/keyframe probes). None when the device isn't an rtsp:// URL
     # (e.g. a v4l2 device index), in which case those probes are skipped.
@@ -165,6 +170,8 @@ def _station_from_config(config_path):
 
     protocol = (cfg.get("protocol") or "tcp").strip().lower()
     device_url = (cfg.get("device") or "").strip() or None
+    config_width = int(_as_float(cfg.get("width")))
+    config_height = int(_as_float(cfg.get("height")))
 
     return Station(
         station_id=station_id,
@@ -186,6 +193,8 @@ def _station_from_config(config_path):
         timelapse_generate_from_frames=_as_bool(
             cfg.get("timelapse_generate_from_frames"), default=True),
         weblog_enable=_as_bool(cfg.get("weblog_enable"), default=True),
+        config_width=config_width,
+        config_height=config_height,
         latitude=latitude,
         longitude=longitude,
         elevation=elevation,

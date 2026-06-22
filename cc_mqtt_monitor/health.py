@@ -24,6 +24,7 @@ CHECK_KEYS = (
     "capture_down",       # capture process for the station not running
     "capture_stalled",    # no FF (night) / no frames (day) within the threshold
     "detection_stalled",  # capturing but no FTPdetectinfo/CALSTARS produced
+    "platepar_mismatch",  # config resolution != platepar -> RMS drops the platepar
     "timelapse_missing",  # a finished frame session's ffmpeg failed (no mp4)
     "timelapse_overdue",  # saving frames but no timelapse mp4 produced in ages
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
@@ -227,6 +228,16 @@ def evaluate(metrics, thresholds, disabled=()):
         flag(ERROR, "capture_stalled", "Night capture stalled: no FF for %.0fs" % fits_age)
     elif expected == "frames" and frame_age is not None and frame_age >= thresholds.output_fresh_error_s:
         flag(ERROR, "capture_stalled", "Daytime capture stalled: no frames for %.0fs" % frame_age)
+
+    # --- Platepar resolution mismatch (silent astrometry killer) ---------
+    # If config width/height != platepar X_res/Y_res, RMS discards the platepar
+    # entirely -> the night's detections get NO astrometric calibration (data is
+    # captured but scientifically unusable). The station otherwise looks healthy.
+    if metrics.get("platepar_res_mismatch"):
+        flag(ERROR, "platepar_mismatch",
+             "Platepar resolution %sx%s != config %sx%s -- RMS discards the platepar, "
+             "no astrometry" % (metrics.get("platepar_x_res"), metrics.get("platepar_y_res"),
+                                metrics.get("config_width"), metrics.get("config_height")))
 
     # --- Silent pipeline failure (the ".so missing" class) ---------------
     if (
