@@ -796,10 +796,23 @@ def _remote_tip_via_temp(url, branch):
         return None, None
 
 
-# The remote is consulted at most once per TTL per checkout (a shallow fetch into
-# a temp dir -- the live RMS repo is never written to, only its HEAD + remote URL
-# are read).
-_REPO_STATUS_CACHE = {}     # rms_dir -> (monotonic_ts, status_dict)
+def _head_signal(rms_dir):
+    """Cheap 'has HEAD moved?' marker: the reflog mtime (appended on every HEAD
+    change -- commit/pull/reset, so it ticks the moment RMS_Update lands an
+    update), falling back to .git/HEAD. A single stat (microseconds). None if
+    unreadable -> caching then relies on the TTL alone."""
+    for rel in ("logs/HEAD", "HEAD"):
+        try:
+            return os.stat(os.path.join(rms_dir, ".git", rel)).st_mtime
+        except OSError:
+            continue
+    return None
+
+
+# The remote is consulted at most once per TTL per checkout -- but the cache is
+# ALSO invalidated the moment HEAD moves (a stat-cheap reflog check), so the
+# dashboard refreshes within a cycle of an RMS_Update instead of waiting the TTL.
+_REPO_STATUS_CACHE = {}     # rms_dir -> (monotonic_ts, status_dict, head_signal)
 _REPO_STATUS_TTL = 1800     # 30 min
 
 
@@ -825,8 +838,10 @@ def rms_repo_status(rms_dir):
         return {}
 
     now = time.monotonic()
+    sig = _head_signal(rms_dir)        # cheap: recheck immediately if HEAD moved
     cached = _REPO_STATUS_CACHE.get(rms_dir)
-    if cached is not None and now - cached[0] < _REPO_STATUS_TTL:
+    if (cached is not None and now - cached[0] < _REPO_STATUS_TTL
+            and sig == cached[2]):
         return cached[1]
 
     status = {}
@@ -852,7 +867,7 @@ def rms_repo_status(rms_dir):
                     if head_epoch is not None and tip_epoch is not None:
                         status["rms_behind_days"] = round(
                             max(0.0, (tip_epoch - head_epoch) / 86400.0), 1)
-    _REPO_STATUS_CACHE[rms_dir] = (now, status)
+    _REPO_STATUS_CACHE[rms_dir] = (now, status, sig)
     return status
 
 
