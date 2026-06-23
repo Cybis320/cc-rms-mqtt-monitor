@@ -5,7 +5,7 @@ import time
 import logging
 
 from .discovery import discover_stations
-from .collect import collect_station, rms_branch, rms_behind
+from .collect import collect_station, rms_branch, rms_up_to_date
 from .oslevel import collect_host, iface_for_ip
 from .health import build_state, build_host_state
 from . import maintenance
@@ -63,8 +63,8 @@ def gather(config, maint=None, host_metrics=None):
     disabled = set(config.disabled_checks or [])
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     now = time.time()
-    branch = rms_branch(config.rms_dir)      # host-wide RMS git branch (one checkout)
-    behind = rms_behind(config.rms_dir)      # commits behind upstream (live, no fetch)
+    branch = rms_branch(config.rms_dir)        # host-wide RMS git branch (one checkout)
+    up_to_date = rms_up_to_date(config.rms_dir)  # vs the ACTUAL remote tip (ls-remote)
     states = []
     for station in stations:
         metrics = collect_station(station, config.log_tail_lines, now,
@@ -87,8 +87,8 @@ def gather(config, maint=None, host_metrics=None):
         state["maintenance_reason"] = maint_reason
         if branch:
             state["rms_branch"] = branch     # which RMS code the station is running
-        if behind is not None:
-            state["rms_behind"] = behind     # commits behind upstream (0 = up to date)
+        if up_to_date is not None:
+            state["rms_up_to_date"] = up_to_date  # vs actual remote tip (True=current)
         # Approximate coordinates for the dashboard map: obfuscated to ~1 km
         # (2 decimals). Omitted entirely when the .config has no coords.
         if station.has_location:
@@ -124,9 +124,9 @@ def gather_host(config, maint=None):
     branch = rms_branch(config.rms_dir)
     if branch:
         state["rms_branch"] = branch
-    behind = rms_behind(config.rms_dir)
-    if behind is not None:
-        state["rms_behind"] = behind
+    up_to_date = rms_up_to_date(config.rms_dir)
+    if up_to_date is not None:
+        state["rms_up_to_date"] = up_to_date
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     state["maintenance"] = maint
     state["maintenance_reason"] = maint_reason

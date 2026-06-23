@@ -727,30 +727,79 @@ def rms_branch(rms_dir):
     return (out.stdout or "").strip() or None
 
 
-def rms_behind(rms_dir):
-    """Commits the RMS checkout is behind its upstream tracking branch, using
-    only local refs (no fetch -- it reflects RMS's last update check, so it can't
-    perturb RMS or hit the network). 0 = up to date; a positive int = behind;
-    None when undeterminable (no upstream tracking set, detached HEAD, or not a
-    git repo). This is the live, every-cycle counterpart to RMS's once-a-night
-    `summary.repository_lag_remote_days`.
-    """
-    rms_dir = os.path.expanduser(rms_dir or "")
-    if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
-        return None
+def _git(rms_dir, *args):
+    """Run a git command in rms_dir, returning stripped stdout or None."""
     try:
-        out = subprocess.run(
-            ["git", "-C", rms_dir, "rev-list", "--count", "HEAD..@{u}"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            timeout=10, universal_newlines=True)
+        out = subprocess.run(["git", "-C", rms_dir] + list(args),
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=20, universal_newlines=True)
     except (OSError, subprocess.SubprocessError):
         return None
     if out.returncode != 0:
         return None
-    try:
-        return int((out.stdout or "").strip())
-    except ValueError:
+    return (out.stdout or "").strip() or None
+
+
+def _resolve_upstream(rms_dir, branch):
+    """(remote, upstream_branch) for `branch`, mirroring RMS_Update.sh's
+    resolve_branch_remote(): the configured @{upstream} if set (handles
+    origin/upstream/rms naming), else a remote that actually has the branch.
+    Returns (None, None) if it can't be resolved."""
+    full = _git(rms_dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                "%s@{upstream}" % branch)
+    if full and "/" in full:
+        remote, _, up = full.partition("/")
+        if remote and up:
+            return remote, up
+    for r in (_git(rms_dir, "remote") or "").split():
+        if _git(rms_dir, "ls-remote", "--exit-code", "--heads", r,
+                "refs/heads/%s" % branch) is not None:
+            return r, branch
+    return None, None
+
+
+# Remote tip is queried at most once per TTL per checkout (network, but read-only
+# -- ls-remote does NOT fetch or touch the local repo, so it can't perturb RMS).
+_REMOTE_TIP_CACHE = {}      # rms_dir -> (monotonic_ts, remote_sha or None)
+_REMOTE_TIP_TTL = 1800      # 30 min
+
+
+def rms_up_to_date(rms_dir):
+    """Whether the RMS checkout matches the ACTUAL current remote tip.
+
+    True = HEAD equals the live remote head; False = behind/diverged; None =
+    undeterminable (offline, detached HEAD, no upstream, not a git repo). Unlike
+    a local `HEAD..@{u}` count, this consults the remote via `git ls-remote`, so
+    it isn't fooled by a stale tracking ref that hasn't been fetched since new
+    commits landed (the reason a never-fetched checkout looked "up to date").
+    Read-only and rate-limited (TTL) so it neither perturbs RMS nor hammers the
+    remote. Remote resolution mirrors RMS_Update.sh (configured upstream first).
+    """
+    rms_dir = os.path.expanduser(rms_dir or "")
+    if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
         return None
+    head = _git(rms_dir, "rev-parse", "HEAD")
+    if not head:
+        return None
+
+    now = time.monotonic()
+    cached = _REMOTE_TIP_CACHE.get(rms_dir)
+    if cached is not None and now - cached[0] < _REMOTE_TIP_TTL:
+        tip = cached[1]
+    else:
+        tip = None
+        branch = _git(rms_dir, "rev-parse", "--abbrev-ref", "HEAD")
+        if branch and branch != "HEAD":
+            remote, up = _resolve_upstream(rms_dir, branch)
+            if remote and up:
+                line = _git(rms_dir, "ls-remote", remote, "refs/heads/%s" % up)
+                if line:
+                    tip = line.split()[0]
+        _REMOTE_TIP_CACHE[rms_dir] = (now, tip)
+
+    if tip is None:
+        return None        # couldn't reach/resolve the remote -> unknown
+    return head == tip
 
 
 # ---------------------------------------------------------------------------

@@ -206,7 +206,7 @@ Example `health` payload:
   "disk_free_gb": 5216.1,
   "upload_queue_len": 0,
   "rms_branch": "master",
-  "rms_behind": 0,
+  "rms_up_to_date": true,
   "host": "us005-host",
   "timestamp": "2026-06-15T17:40:00Z"
 }
