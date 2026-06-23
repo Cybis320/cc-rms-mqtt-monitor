@@ -35,6 +35,12 @@ Distinguish the two `health` shapes by payload:
 - `rms_mode` — RMS's **actual** day/night capture mode: `day` | `night` | `null`
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.
+- `rms_branch` — RMS git branch the checkout is on (host-wide).
+- `rms_up_to_date` (bool) + `rms_behind_days` (float) — how current the RMS code
+  is vs its actual remote tip (`rms_behind_days` matches RMS's own
+  `repository_lag_remote_days`). Host-wide (one checkout per box), but mirrored
+  onto each station record for dashboard convenience. **See §9 for the day-based
+  alert tiers.** Absent when undeterminable (offline / detached / no upstream).
 - `host`, `timestamp` (ISO-8601 UTC)
 
 **Host** (`stations/<host>/health`):
@@ -158,3 +164,21 @@ tests, a host test won't fan out to `group_slugs`/`station_ids` and you'll see
 - Treat a station as stale if its host's `status` is `offline` or its
   `timestamp` is older than ~3× the publish interval.
 - Don't alert on `status: ok` except as a recovery edge.
+
+## 9. Outdated-RMS alert (day-based tiers, bridge-side)
+
+`rms_behind_days` is published as raw data; the **bridge** decides severity (it's
+a separate axis from the operational `status`, so a fully-working but stale box
+should still nudge). Evaluate it on the **host** record (one RMS checkout per
+box — don't multiply by each station):
+
+| `rms_behind_days` | Action |
+|---|---|
+| `< 1` (incl. 0) | **no alert** — normal update cadence |
+| `1 ≤ x ≤ 3` | **degraded** alert (e.g. "RMS code N days behind") |
+| `> 3` | **error** alert |
+| absent / `null` | no alert (couldn't determine — offline/detached) |
+
+Fan it out on the host axes (§3, `group_slugs` + `station_ids`). `rms_up_to_date`
+is the at-a-glance boolean for the dashboard; the day tiers above drive alerting.
+Suppress while `maintenance` is true (§4), same as any host alert.

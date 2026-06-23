@@ -207,6 +207,7 @@ Example `health` payload:
   "upload_queue_len": 0,
   "rms_branch": "master",
   "rms_up_to_date": true,
+  "rms_behind_days": 0.0,
   "host": "us005-host",
   "timestamp": "2026-06-15T17:40:00Z"
 }

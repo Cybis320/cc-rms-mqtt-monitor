@@ -758,48 +758,60 @@ def _resolve_upstream(rms_dir, branch):
     return None, None
 
 
-# Remote tip is queried at most once per TTL per checkout (network, but read-only
-# -- ls-remote does NOT fetch or touch the local repo, so it can't perturb RMS).
-_REMOTE_TIP_CACHE = {}      # rms_dir -> (monotonic_ts, remote_sha or None)
-_REMOTE_TIP_TTL = 1800      # 30 min
+def _commit_epoch(rms_dir, ref):
+    """Committer-date (unix seconds) of a ref, or None."""
+    try:
+        return int(_git(rms_dir, "log", "-1", "--format=%ct", ref) or "")
+    except (TypeError, ValueError):
+        return None
 
 
-def rms_up_to_date(rms_dir):
-    """Whether the RMS checkout matches the ACTUAL current remote tip.
+# The remote is consulted at most once per TTL per checkout: a single-branch
+# `git fetch` (updates only the remote-tracking ref + objects -- never HEAD, the
+# working tree, or local branches, so what RMS *runs* is untouched).
+_REPO_STATUS_CACHE = {}     # rms_dir -> (monotonic_ts, status_dict)
+_REPO_STATUS_TTL = 1800     # 30 min
 
-    True = HEAD equals the live remote head; False = behind/diverged; None =
-    undeterminable (offline, detached HEAD, no upstream, not a git repo). Unlike
-    a local `HEAD..@{u}` count, this consults the remote via `git ls-remote`, so
-    it isn't fooled by a stale tracking ref that hasn't been fetched since new
-    commits landed (the reason a never-fetched checkout looked "up to date").
-    Read-only and rate-limited (TTL) so it neither perturbs RMS nor hammers the
-    remote. Remote resolution mirrors RMS_Update.sh (configured upstream first).
+
+def rms_repo_status(rms_dir):
+    """How current the RMS checkout is vs its actual remote.
+
+    Returns a dict (empty when undeterminable -- offline, detached HEAD, no
+    upstream, not a git repo):
+      rms_up_to_date  -- HEAD equals the live remote tip (quick yes/no)
+      rms_behind_days -- days HEAD lags the remote tip, matching RMS's own
+                         repository_lag_remote_days (remote-tip commit date minus
+                         local HEAD commit date); 0.0 when current.
+
+    A local `HEAD..@{u}` count is fooled by a stale tracking ref (the bug this
+    fixes), so we refresh from the remote -- but with a rate-limited single-branch
+    fetch (tracking ref + objects only) so it neither perturbs what RMS runs nor
+    hammers the remote. Remote resolution mirrors RMS_Update.sh.
     """
     rms_dir = os.path.expanduser(rms_dir or "")
     if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
-        return None
-    head = _git(rms_dir, "rev-parse", "HEAD")
-    if not head:
-        return None
+        return {}
 
     now = time.monotonic()
-    cached = _REMOTE_TIP_CACHE.get(rms_dir)
-    if cached is not None and now - cached[0] < _REMOTE_TIP_TTL:
-        tip = cached[1]
-    else:
-        tip = None
-        branch = _git(rms_dir, "rev-parse", "--abbrev-ref", "HEAD")
-        if branch and branch != "HEAD":
-            remote, up = _resolve_upstream(rms_dir, branch)
-            if remote and up:
-                line = _git(rms_dir, "ls-remote", remote, "refs/heads/%s" % up)
-                if line:
-                    tip = line.split()[0]
-        _REMOTE_TIP_CACHE[rms_dir] = (now, tip)
+    cached = _REPO_STATUS_CACHE.get(rms_dir)
+    if cached is not None and now - cached[0] < _REPO_STATUS_TTL:
+        return cached[1]
 
-    if tip is None:
-        return None        # couldn't reach/resolve the remote -> unknown
-    return head == tip
+    status = {}
+    branch = _git(rms_dir, "rev-parse", "--abbrev-ref", "HEAD")
+    if branch and branch != "HEAD":
+        remote, up = _resolve_upstream(rms_dir, branch)
+        if remote and up:
+            _git(rms_dir, "fetch", "--quiet", remote, up)   # refresh tracking ref only
+            head = _git(rms_dir, "rev-parse", "HEAD")
+            tip = _git(rms_dir, "rev-parse", "FETCH_HEAD")   # the just-fetched remote tip
+            if head and tip:
+                status["rms_up_to_date"] = (head == tip)
+                h_t, r_t = _commit_epoch(rms_dir, "HEAD"), _commit_epoch(rms_dir, "FETCH_HEAD")
+                if h_t is not None and r_t is not None:
+                    status["rms_behind_days"] = round(max(0.0, (r_t - h_t) / 86400.0), 1)
+    _REPO_STATUS_CACHE[rms_dir] = (now, status)
+    return status
 
 
 # ---------------------------------------------------------------------------
