@@ -814,10 +814,11 @@ def rms_repo_status(rms_dir):
                          local HEAD commit date); 0.0 when current.
 
     A local `HEAD..@{u}` count is fooled by a stale tracking ref (the bug this
-    fixes). We instead read the real remote tip via a rate-limited, shallow fetch
-    into a THROWAWAY temp repo -- so the live RMS checkout is never touched (no
-    fetch into it, no lock contention with RMS's own git), exactly as RMS's
-    daysBehind() does. Remote resolution mirrors RMS_Update.sh.
+    fixes). Instead: the up-to-date GATE is `git ls-remote` vs HEAD -- no fetch,
+    exactly as RMS_Update.sh decides it. Only when actually behind do we spend a
+    shallow fetch into a THROWAWAY temp repo to read the remote commit date for
+    the day-lag (ls-remote gives no date), as RMS's daysBehind() does. Either way
+    the live RMS checkout is never written to. Resolution mirrors RMS_Update.sh.
     """
     rms_dir = os.path.expanduser(rms_dir or "")
     if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
@@ -833,15 +834,24 @@ def rms_repo_status(rms_dir):
     head = _git(rms_dir, "rev-parse", "HEAD")
     if branch and branch != "HEAD" and head:
         remote, up = _resolve_upstream(rms_dir, branch)
-        url = _git(rms_dir, "remote", "get-url", remote) if remote else None
-        if remote and up and url:
-            tip_sha, tip_epoch = _remote_tip_via_temp(url, up)
+        if remote and up:
+            # The up-to-date GATE: ls-remote SHA vs HEAD, exactly as RMS_Update.sh
+            # does it (no fetch, zero-touch).
+            line = _git(rms_dir, "ls-remote", remote, "refs/heads/%s" % up)
+            tip_sha = line.split()[0] if line else None
             if tip_sha:
                 status["rms_up_to_date"] = (head == tip_sha)
-                head_epoch = _commit_epoch(rms_dir, "HEAD")
-                if head_epoch is not None and tip_epoch is not None:
-                    status["rms_behind_days"] = round(
-                        max(0.0, (tip_epoch - head_epoch) / 86400.0), 1)
+                if head == tip_sha:
+                    status["rms_behind_days"] = 0.0
+                else:
+                    # Behind/diverged: only NOW spend a temp fetch to get the
+                    # remote commit date for the day-lag (ls-remote gives no date).
+                    url = _git(rms_dir, "remote", "get-url", remote)
+                    head_epoch = _commit_epoch(rms_dir, "HEAD")
+                    _, tip_epoch = _remote_tip_via_temp(url, up) if url else (None, None)
+                    if head_epoch is not None and tip_epoch is not None:
+                        status["rms_behind_days"] = round(
+                            max(0.0, (tip_epoch - head_epoch) / 86400.0), 1)
     _REPO_STATUS_CACHE[rms_dir] = (now, status)
     return status
 
