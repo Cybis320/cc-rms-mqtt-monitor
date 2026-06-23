@@ -12,6 +12,7 @@ import glob
 import json
 import shutil
 import subprocess
+import tempfile
 import time
 import calendar
 
@@ -758,17 +759,46 @@ def _resolve_upstream(rms_dir, branch):
     return None, None
 
 
-def _commit_epoch(rms_dir, ref):
+def _git_ok(cwd, *args, **kw):
+    """Run a side-effecting git command (init/fetch); return True on rc 0."""
+    try:
+        return subprocess.run(["git", "-C", cwd] + list(args),
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=kw.get("timeout", 30)).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _commit_epoch(repo, ref):
     """Committer-date (unix seconds) of a ref, or None."""
     try:
-        return int(_git(rms_dir, "log", "-1", "--format=%ct", ref) or "")
+        return int(_git(repo, "log", "-1", "--format=%ct", ref) or "")
     except (TypeError, ValueError):
         return None
 
 
-# The remote is consulted at most once per TTL per checkout: a single-branch
-# `git fetch` (updates only the remote-tracking ref + objects -- never HEAD, the
-# working tree, or local branches, so what RMS *runs* is untouched).
+def _remote_tip_via_temp(url, branch):
+    """(tip_sha, tip_committer_epoch) for url's branch, fetched into a THROWAWAY
+    temp repo -- never touches the live RMS checkout (mirrors RMS's daysBehind(),
+    which temp-clones rather than fetch into the live repo). Shallow, single
+    branch. (None, None) on any failure."""
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            if not _git_ok(tmp, "init", "-q"):
+                return None, None
+            # blob:none + tree:0: fetch only the commit object (we just need its
+            # date), not the file tree -- keeps it to a fast metadata-only pull.
+            if not _git_ok(tmp, "fetch", "--depth=1", "--filter=tree:0", "--quiet",
+                           url, "refs/heads/%s" % branch, timeout=30):
+                return None, None
+            return _git(tmp, "rev-parse", "FETCH_HEAD"), _commit_epoch(tmp, "FETCH_HEAD")
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+
+
+# The remote is consulted at most once per TTL per checkout (a shallow fetch into
+# a temp dir -- the live RMS repo is never written to, only its HEAD + remote URL
+# are read).
 _REPO_STATUS_CACHE = {}     # rms_dir -> (monotonic_ts, status_dict)
 _REPO_STATUS_TTL = 1800     # 30 min
 
@@ -784,9 +814,10 @@ def rms_repo_status(rms_dir):
                          local HEAD commit date); 0.0 when current.
 
     A local `HEAD..@{u}` count is fooled by a stale tracking ref (the bug this
-    fixes), so we refresh from the remote -- but with a rate-limited single-branch
-    fetch (tracking ref + objects only) so it neither perturbs what RMS runs nor
-    hammers the remote. Remote resolution mirrors RMS_Update.sh.
+    fixes). We instead read the real remote tip via a rate-limited, shallow fetch
+    into a THROWAWAY temp repo -- so the live RMS checkout is never touched (no
+    fetch into it, no lock contention with RMS's own git), exactly as RMS's
+    daysBehind() does. Remote resolution mirrors RMS_Update.sh.
     """
     rms_dir = os.path.expanduser(rms_dir or "")
     if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
@@ -799,17 +830,18 @@ def rms_repo_status(rms_dir):
 
     status = {}
     branch = _git(rms_dir, "rev-parse", "--abbrev-ref", "HEAD")
-    if branch and branch != "HEAD":
+    head = _git(rms_dir, "rev-parse", "HEAD")
+    if branch and branch != "HEAD" and head:
         remote, up = _resolve_upstream(rms_dir, branch)
-        if remote and up:
-            _git(rms_dir, "fetch", "--quiet", remote, up)   # refresh tracking ref only
-            head = _git(rms_dir, "rev-parse", "HEAD")
-            tip = _git(rms_dir, "rev-parse", "FETCH_HEAD")   # the just-fetched remote tip
-            if head and tip:
-                status["rms_up_to_date"] = (head == tip)
-                h_t, r_t = _commit_epoch(rms_dir, "HEAD"), _commit_epoch(rms_dir, "FETCH_HEAD")
-                if h_t is not None and r_t is not None:
-                    status["rms_behind_days"] = round(max(0.0, (r_t - h_t) / 86400.0), 1)
+        url = _git(rms_dir, "remote", "get-url", remote) if remote else None
+        if remote and up and url:
+            tip_sha, tip_epoch = _remote_tip_via_temp(url, up)
+            if tip_sha:
+                status["rms_up_to_date"] = (head == tip_sha)
+                head_epoch = _commit_epoch(rms_dir, "HEAD")
+                if head_epoch is not None and tip_epoch is not None:
+                    status["rms_behind_days"] = round(
+                        max(0.0, (tip_epoch - head_epoch) / 86400.0), 1)
     _REPO_STATUS_CACHE[rms_dir] = (now, status)
     return status
 
