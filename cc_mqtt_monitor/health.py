@@ -211,6 +211,19 @@ def evaluate(metrics, thresholds, disabled=()):
     session_age = metrics.get("capture_session_age_s")
     expected = metrics.get("expected_output")     # ff/frames/idle/transition/None
 
+    # Settling grace: a just-(re)started capture has no fresh output yet, and its
+    # newest FF/frame on disk is from before the restart (age spans the downtime).
+    # GRMSUpdater restarts the cameras on a host in a stagger, so the tail ones
+    # come back minutes apart -- give each one a grace from ITS OWN process start
+    # (plus RMS's capture_wait_seconds pre-capture sleep) before a stale age may
+    # count as a stall. capture_age None (unknown) => no suppression (fail toward
+    # alerting). A genuinely stalled long-running capture has a large age and is
+    # unaffected.
+    capture_age = metrics.get("capture_age_s")
+    restart_grace = (thresholds.capture_restart_grace_s
+                     + (metrics.get("capture_wait_seconds") or 0))
+    settling = capture_age is not None and capture_age < restart_grace
+
     # Fallback when the station has no lat/lon: use the camera's own _d/_n frame
     # tag, then the session-active heuristic.
     if expected is None:
@@ -225,9 +238,11 @@ def evaluate(metrics, thresholds, disabled=()):
         else:
             expected = "idle"
 
-    if expected == "ff" and fits_age is not None and fits_age >= thresholds.output_fresh_error_s:
+    if (expected == "ff" and fits_age is not None
+            and fits_age >= thresholds.output_fresh_error_s and not settling):
         flag(ERROR, "capture_stalled", "Night capture stalled: no FF for %.0fs" % fits_age)
-    elif expected == "frames" and frame_age is not None and frame_age >= thresholds.output_fresh_error_s:
+    elif (expected == "frames" and frame_age is not None
+            and frame_age >= thresholds.output_fresh_error_s and not settling):
         flag(ERROR, "capture_stalled", "Daytime capture stalled: no frames for %.0fs" % frame_age)
 
     # --- Platepar resolution mismatch (silent astrometry killer) ---------

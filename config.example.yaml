@@ -90,6 +90,11 @@ log_warning_ignore: []
 thresholds:
   output_fresh_error_s: 300    # error if no output (FF at night / frames by day)
                                # for this long; generous to ride mode switches
+  capture_restart_grace_s: 300 # settling grace after a capture (re)starts before
+                               # its stale-output age may count as a stall; added
+                               # to the station's capture_wait_seconds and measured
+                               # from each station's own process start, so a
+                               # staggered GRMSUpdater restart never false-alarms
   capture_active_window_s: 3600
   detection_grace_s: 1800
   timelapse_grace_s: 3600      # 1h grace before flagging a session's missing mp4

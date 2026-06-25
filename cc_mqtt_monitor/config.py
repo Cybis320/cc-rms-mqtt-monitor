@@ -58,6 +58,15 @@ class Thresholds:
     # purpose so it rides through camera day/night mode switches, which pause
     # output for a bit while the camera reconfigures.
     output_fresh_error_s: int = 300
+    # Settling grace after a capture process (re)starts, before its stale-output
+    # age may count as a stall. A freshly restarted station's newest FF/frame on
+    # disk is from BEFORE the restart, so its age spans the whole downtime -- for
+    # the tail of a staggered GRMSUpdater restart that is well past
+    # output_fresh_error_s the instant capture comes back. The effective grace is
+    # this PLUS the station's capture_wait_seconds (RMS's pre-capture sleep), and
+    # it is measured from each station's OWN process start, so it rides through
+    # the stagger regardless of time of day or how long the updater ran.
+    capture_restart_grace_s: int = 300
     # A non-continuous station counts as "capturing" only while its latest
     # captured directory was written within this window (tells a real stall
     # from normal daytime idle, without predicting the sun).

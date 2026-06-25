@@ -77,6 +77,31 @@ def _proc_cpu_jiffies(pid):
         return 0
 
 
+def _proc_age_s(pid):
+    """Seconds since process <pid> started, or None if it can't be determined.
+
+    Derived from the kernel's starttime (jiffies since boot, /proc/<pid>/stat
+    field 22) versus /proc/uptime, so it is the process's TRUE age -- independent
+    of when the monitor started watching. Used to grant a just-(re)started
+    capture a settling grace before its stale-output age can count as a stall."""
+    try:
+        with open("/proc/%d/stat" % pid) as fh:
+            data = fh.read()
+        with open("/proc/uptime") as fh:
+            uptime = float(fh.read().split()[0])
+    except (IOError, OSError, ValueError, IndexError):
+        return None
+    rpar = data.rfind(")")
+    if rpar < 0:
+        return None
+    fields = data[rpar + 2:].split()      # fields from "state" on (post-comm)
+    try:
+        starttime_ticks = float(fields[19])   # field 22 (post-comm index 19)
+    except (ValueError, IndexError):
+        return None
+    return round(uptime - starttime_ticks / _CLK_TCK, 1)
+
+
 def _process_config_path(pid, args):
     """The .config a StartCapture process uses: the ``-c/--config`` argument when
     given (multicam), else the default ``.config`` in the process's working
@@ -148,6 +173,11 @@ def collect_process(station):
         "capture_alive": bool(matches),
         "process_count": len(matches),
         "main_pid": main_pid,
+        # Age of the capture tree's main process. A staggered GRMSUpdater restart
+        # (and RMS's own capture_wait_seconds pre-capture sleep) means the tail
+        # cameras come back minutes apart; the stall check uses this to give each
+        # station a settling grace measured from ITS OWN restart, not host-wide.
+        "capture_age_s": _proc_age_s(main_pid) if main_pid is not None else None,
         "total_rss_mb": total_rss_mb,
         "capture_cpu_pct": cpu_pct,
     }
@@ -947,6 +977,11 @@ def collect_mode(station, now=None):
         "continuous_capture": station.continuous_capture,
         "switch_camera_modes": station.switch_camera_modes,
         "save_frames": station.save_frames,
+        # RMS's per-station programmed delay: applied both as a mode-switch
+        # stagger and as a pre-capture sleep on every (non-resume) StartCapture,
+        # so it widens the no-output window right after a restart. The stall
+        # check adds it to the settling grace.
+        "capture_wait_seconds": station.capture_wait_seconds,
         "solar_elevation_deg": None,
         "expected_output": None,
         "mode_source": None,

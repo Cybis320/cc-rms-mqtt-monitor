@@ -65,7 +65,7 @@ the human-readable text.
 | Key | Severity | Fires when | Threshold |
 |---|---|---|---|
 | `capture_down` | error | the station's `RMS.StartCapture` process isn't running | — |
-| `capture_stalled` | error | expected output is stale — no FF (night) or no frame (continuous day) | `output_fresh_error_s` (300s) |
+| `capture_stalled` | error | expected output is stale — no FF (night) or no frame (continuous day). Suppressed for a settling grace after the capture process (re)starts, so a staggered GRMSUpdater restart doesn't false-alarm | `output_fresh_error_s` (300s); grace `capture_restart_grace_s` (300s) + the station's `capture_wait_seconds` |
 | `detection_stalled` | error | capturing FF but no `FTPdetectinfo`/`CALSTARS` produced | `detection_grace_s` (1800s) |
 | `platepar_mismatch` | error | `.config` resolution ≠ platepar `X_res`/`Y_res` — RMS discards the platepar, so the night gets **no astrometric calibration** (silent data killer) | — |
 | `config_fov_mismatch` | degraded | the real FOV (platepar `fov_h`) is outside `[0.75×, 1.5×] config.fov_w` — astrometry.net's solve range, so a fresh auto-calibration would fail (latent; existing platepar still works) | — |
@@ -89,6 +89,16 @@ Day/night for `capture_stalled` comes from the sun (matching RMS's own switch
 horizon + programmed delays), not from frame creation. Conditional checks stay
 quiet when not applicable (e.g. `upload_backlog` only when uploads are queued,
 the clock checks only when a summary exists).
+
+A freshly (re)started capture is given a settling grace before its stale-output
+age can count as a stall. The newest FF/frame on disk is from *before* the
+restart, so its age spans the whole downtime — and a GRMSUpdater run restarts the
+cameras on a host in a stagger (plus RMS sleeps each one `capture_wait_seconds`
+before capture starts), so the tail cameras come back minutes apart. The grace is
+measured from each station's **own** process age (`capture_age_s`, from
+`/proc/<pid>`), so it rides through the stagger regardless of time of day or how
+long the updater ran — unlike the host-wide `maintenance` flag, which flips off at
+a single instant.
 
 **Silencing a check:** add its key to `disabled_checks` in `config.yaml`
 (default empty = all on), e.g.:
