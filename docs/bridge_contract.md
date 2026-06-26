@@ -36,11 +36,13 @@ Distinguish the two `health` shapes by payload:
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.
 - `rms_branch` — RMS git branch the checkout is on (host-wide).
-- `rms_up_to_date` (bool) + `rms_behind_days` (float) — how current the RMS code
-  is vs its actual remote tip (`rms_behind_days` matches RMS's own
-  `repository_lag_remote_days`). Host-wide (one checkout per box), but mirrored
-  onto each station record for dashboard convenience. **See §9 for the day-based
-  alert tiers.** Absent when undeterminable (offline / detached / no upstream).
+- `rms_up_to_date` (bool) — HEAD is exactly the live remote tip (ls-remote vs HEAD).
+- `rms_update_age_days` (float) — days since this checkout last actually pulled new
+  code (reflog age). This is the "is the updater keeping up?" signal — NOT a
+  commit-date lag (a commit's date can predate when it lands on the branch, so a
+  commit-date "days behind" misreports). Host-wide (one checkout per box), mirrored
+  onto each station record. **See §9 for the alert tiers.** Absent when
+  undeterminable (offline / detached / no upstream / no reflog).
 - `host`, `timestamp` (ISO-8601 UTC)
 
 **Host** (`stations/<host>/health`):
@@ -165,20 +167,29 @@ tests, a host test won't fan out to `group_slugs`/`station_ids` and you'll see
   `timestamp` is older than ~3× the publish interval.
 - Don't alert on `status: ok` except as a recovery edge.
 
-## 9. Outdated-RMS alert (day-based tiers, bridge-side)
+## 9. Stale-RMS alert (bridge-side)
 
-`rms_behind_days` is published as raw data; the **bridge** decides severity (it's
-a separate axis from the operational `status`, so a fully-working but stale box
-should still nudge). Evaluate it on the **host** record (one RMS checkout per
-box — don't multiply by each station):
+This is a separate axis from the operational `status` (a fully-working box can
+still be running stale code). The **bridge** decides severity, on the **host**
+record (one RMS checkout per box — don't multiply by each station).
 
-| `rms_behind_days` | Action |
+**Gate on `rms_up_to_date == false`, then tier on `rms_update_age_days`** (days
+since the station last actually pulled new code — the "is the updater keeping
+up?" number, immune to commit-date quirks):
+
+| Condition | Action |
 |---|---|
-| `< 1` (incl. 0) | **no alert** — normal update cadence |
-| `1 ≤ x ≤ 3` | **degraded** alert (e.g. "RMS code N days behind") |
-| `> 3` | **error** alert |
-| absent / `null` | no alert (couldn't determine — offline/detached) |
+| `rms_up_to_date == true` | **no alert** — on the tip (regardless of age; a quiet branch just hasn't moved) |
+| not up-to-date, `rms_update_age_days < 1` | **no alert** — updater ran recently; normal lag on an active branch |
+| not up-to-date, `1 ≤ age ≤ 3` | **degraded** — updater hasn't caught up in 1–3 days |
+| not up-to-date, `age > 3` | **error** — updater appears stuck |
+| either field absent | no alert (couldn't determine — offline/detached) |
+
+> Do **not** tier on a commit-date "days behind": a commit's date can long
+> predate when it merges, so that misreports a huge lag the instant such a commit
+> lands. `rms_update_age_days` reflects when THIS station last pulled, which is
+> what actually tells you the updater stopped working.
 
 Fan it out on the host axes (§3, `group_slugs` + `station_ids`). `rms_up_to_date`
-is the at-a-glance boolean for the dashboard; the day tiers above drive alerting.
-Suppress while `maintenance` is true (§4), same as any host alert.
+is the at-a-glance boolean for the dashboard. Suppress while `maintenance` is
+true (§4), same as any host alert.

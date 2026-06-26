@@ -12,7 +12,6 @@ import glob
 import json
 import shutil
 import subprocess
-import tempfile
 import time
 import calendar
 
@@ -789,43 +788,6 @@ def _resolve_upstream(rms_dir, branch):
     return None, None
 
 
-def _git_ok(cwd, *args, **kw):
-    """Run a side-effecting git command (init/fetch); return True on rc 0."""
-    try:
-        return subprocess.run(["git", "-C", cwd] + list(args),
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              timeout=kw.get("timeout", 30)).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _commit_epoch(repo, ref):
-    """Committer-date (unix seconds) of a ref, or None."""
-    try:
-        return int(_git(repo, "log", "-1", "--format=%ct", ref) or "")
-    except (TypeError, ValueError):
-        return None
-
-
-def _remote_tip_via_temp(url, branch):
-    """(tip_sha, tip_committer_epoch) for url's branch, fetched into a THROWAWAY
-    temp repo -- never touches the live RMS checkout (mirrors RMS's daysBehind(),
-    which temp-clones rather than fetch into the live repo). Shallow, single
-    branch. (None, None) on any failure."""
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            if not _git_ok(tmp, "init", "-q"):
-                return None, None
-            # blob:none + tree:0: fetch only the commit object (we just need its
-            # date), not the file tree -- keeps it to a fast metadata-only pull.
-            if not _git_ok(tmp, "fetch", "--depth=1", "--filter=tree:0", "--quiet",
-                           url, "refs/heads/%s" % branch, timeout=30):
-                return None, None
-            return _git(tmp, "rev-parse", "FETCH_HEAD"), _commit_epoch(tmp, "FETCH_HEAD")
-    except (OSError, subprocess.SubprocessError):
-        return None, None
-
-
 def _head_signal(rms_dir):
     """Cheap 'has HEAD moved?' marker: the reflog mtime (appended on every HEAD
     change -- commit/pull/reset, so it ticks the moment RMS_Update lands an
@@ -839,65 +801,64 @@ def _head_signal(rms_dir):
     return None
 
 
-# The remote is consulted at most once per TTL per checkout -- but the cache is
-# ALSO invalidated the moment HEAD moves (a stat-cheap reflog check), so the
-# dashboard refreshes within a cycle of an RMS_Update instead of waiting the TTL.
-_REPO_STATUS_CACHE = {}     # rms_dir -> (monotonic_ts, status_dict, head_signal)
-_REPO_STATUS_TTL = 1800     # 30 min
+# up_to_date (the ls-remote check) is cached per TTL AND invalidated the instant
+# HEAD moves (a stat-cheap reflog check), so the dashboard reflects an RMS_Update
+# within a cycle. The update-age is recomputed fresh every call (just a stat).
+_UPTODATE_CACHE = {}     # rms_dir -> (monotonic_ts, up_to_date_or_None, head_signal)
+_UPTODATE_TTL = 1800     # 30 min
+
+
+def _check_up_to_date(rms_dir):
+    """True/False if HEAD equals the live remote tip -- `git ls-remote` vs HEAD,
+    exactly as RMS_Update.sh's gate (no fetch, zero-touch). None if undeterminable
+    (detached HEAD, no upstream, offline). Resolution mirrors RMS_Update.sh."""
+    branch = _git(rms_dir, "rev-parse", "--abbrev-ref", "HEAD")
+    head = _git(rms_dir, "rev-parse", "HEAD")
+    if not (branch and branch != "HEAD" and head):
+        return None
+    remote, up = _resolve_upstream(rms_dir, branch)
+    if not (remote and up):
+        return None
+    line = _git(rms_dir, "ls-remote", remote, "refs/heads/%s" % up)
+    tip_sha = line.split()[0] if line else None
+    if not tip_sha:
+        return None
+    return head == tip_sha
 
 
 def rms_repo_status(rms_dir):
-    """How current the RMS checkout is vs its actual remote.
+    """How current the RMS checkout is. Returns a dict (empty if not a git repo):
 
-    Returns a dict (empty when undeterminable -- offline, detached HEAD, no
-    upstream, not a git repo):
-      rms_up_to_date  -- HEAD equals the live remote tip (quick yes/no)
-      rms_behind_days -- days HEAD lags the remote tip, matching RMS's own
-                         repository_lag_remote_days (remote-tip commit date minus
-                         local HEAD commit date); 0.0 when current.
+      rms_up_to_date      -- HEAD equals the live remote tip (ls-remote vs HEAD,
+                             like RMS_Update.sh's gate; no fetch, zero-touch).
+      rms_update_age_days -- days since this checkout last actually pulled new
+                             code (reflog mtime).
 
-    A local `HEAD..@{u}` count is fooled by a stale tracking ref (the bug this
-    fixes). Instead: the up-to-date GATE is `git ls-remote` vs HEAD -- no fetch,
-    exactly as RMS_Update.sh decides it. Only when actually behind do we spend a
-    shallow fetch into a THROWAWAY temp repo to read the remote commit date for
-    the day-lag (ls-remote gives no date), as RMS's daysBehind() does. Either way
-    the live RMS checkout is never written to. Resolution mirrors RMS_Update.sh.
+    `rms_update_age_days`, NOT a commit-date lag, is the "is the updater keeping
+    up?" signal. A commit's date can long predate when it lands on the branch (a
+    PR that sat for weeks merges today), so a commit-date "days behind" reports a
+    huge lag the instant such a commit merges -- nonsense. Update age measures
+    when THIS station last pulled, which is immune to that. up_to_date is cached
+    per TTL but re-checked the instant HEAD moves; update age is fresh each call.
     """
     rms_dir = os.path.expanduser(rms_dir or "")
     if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
         return {}
 
-    now = time.monotonic()
-    sig = _head_signal(rms_dir)        # cheap: recheck immediately if HEAD moved
-    cached = _REPO_STATUS_CACHE.get(rms_dir)
-    if (cached is not None and now - cached[0] < _REPO_STATUS_TTL
-            and sig == cached[2]):
-        return cached[1]
-
     status = {}
-    branch = _git(rms_dir, "rev-parse", "--abbrev-ref", "HEAD")
-    head = _git(rms_dir, "rev-parse", "HEAD")
-    if branch and branch != "HEAD" and head:
-        remote, up = _resolve_upstream(rms_dir, branch)
-        if remote and up:
-            # The up-to-date GATE: ls-remote SHA vs HEAD, exactly as RMS_Update.sh
-            # does it (no fetch, zero-touch).
-            line = _git(rms_dir, "ls-remote", remote, "refs/heads/%s" % up)
-            tip_sha = line.split()[0] if line else None
-            if tip_sha:
-                status["rms_up_to_date"] = (head == tip_sha)
-                if head == tip_sha:
-                    status["rms_behind_days"] = 0.0
-                else:
-                    # Behind/diverged: only NOW spend a temp fetch to get the
-                    # remote commit date for the day-lag (ls-remote gives no date).
-                    url = _git(rms_dir, "remote", "get-url", remote)
-                    head_epoch = _commit_epoch(rms_dir, "HEAD")
-                    _, tip_epoch = _remote_tip_via_temp(url, up) if url else (None, None)
-                    if head_epoch is not None and tip_epoch is not None:
-                        status["rms_behind_days"] = round(
-                            max(0.0, (tip_epoch - head_epoch) / 86400.0), 1)
-    _REPO_STATUS_CACHE[rms_dir] = (now, status, sig)
+    sig = _head_signal(rms_dir)        # reflog mtime: last time HEAD moved
+    if sig is not None:
+        status["rms_update_age_days"] = round(max(0.0, (time.time() - sig) / 86400.0), 1)
+
+    now = time.monotonic()
+    cached = _UPTODATE_CACHE.get(rms_dir)
+    if cached is not None and now - cached[0] < _UPTODATE_TTL and sig == cached[2]:
+        up = cached[1]
+    else:
+        up = _check_up_to_date(rms_dir)
+        _UPTODATE_CACHE[rms_dir] = (now, up, sig)
+    if up is not None:
+        status["rms_up_to_date"] = up
     return status
 
 
