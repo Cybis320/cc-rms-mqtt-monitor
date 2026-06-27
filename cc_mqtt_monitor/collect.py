@@ -137,40 +137,56 @@ def collect_process(station):
     process is the matching PID whose parent is not itself a matching PID.
     """
     target = os.path.realpath(station.config_path)
-    matches = []  # (pid, ppid, vmrss_kb)
-    for pid, args, ppid, vmrss_kb in _iter_proc():
-        if not any(_STARTCAPTURE_MARKER in a for a in args):
-            continue
-        if _process_config_path(pid, args) == target:
-            matches.append((pid, ppid, vmrss_kb))
+    procs = list(_iter_proc())          # (pid, args, ppid, vmrss_kb)
 
-    match_pids = {pid for pid, _, _ in matches}
+    # The StartCapture process(es) carrying THIS station's config on their cmdline.
+    cmd_pids = {pid for pid, args, ppid, _ in procs
+                if any(_STARTCAPTURE_MARKER in a for a in args)
+                and _process_config_path(pid, args) == target}
+    # Main = a cmdline match whose parent isn't also a match (the tree root).
     main_pid = None
-    for pid, ppid, _ in matches:
-        if ppid not in match_pids:
+    for pid, args, ppid, _ in procs:
+        if pid in cmd_pids and ppid not in cmd_pids:
             main_pid = pid
             break
 
-    total_rss_mb = round(sum(rss for _, _, rss in matches) / 1024.0, 1)
+    # Count the WHOLE tree under main, not just cmdline matches: with the
+    # multiprocessing 'forkserver' start method (py3.14 support) the workers are
+    # spawned by a forkserver helper and DON'T inherit the StartCapture cmdline --
+    # only the main process does. Walking the PPID tree from main captures them
+    # (and the classic 'fork' children too).
+    children, rss = {}, {}
+    for pid, args, ppid, vmrss_kb in procs:
+        children.setdefault(ppid, []).append(pid)
+        rss[pid] = vmrss_kb
+    tree, stack = set(), ([main_pid] if main_pid is not None else [])
+    while stack:
+        p = stack.pop()
+        if p in tree:
+            continue
+        tree.add(p)
+        stack.extend(children.get(p, []))
+
+    total_rss_mb = round(sum(rss.get(p, 0) for p in tree) / 1024.0, 1)
 
     # CPU% of the whole capture tree over the interval (delta of cumulative
     # utime+stime / wall time). A saturated capture process is the on-station
     # signature of CPU back-pressure dropping frames. First sample => null.
     cpu_pct = None
-    jiffies = sum(_proc_cpu_jiffies(pid) for pid in match_pids)
+    jiffies = sum(_proc_cpu_jiffies(pid) for pid in tree)
     now = time.monotonic()
     last = _PROC_CPU_LAST.get(station.station_id)
-    if matches and last is not None and now > last[1] and jiffies >= last[0]:
+    if tree and last is not None and now > last[1] and jiffies >= last[0]:
         secs = (jiffies - last[0]) / float(_CLK_TCK)
         cpu_pct = round(secs / (now - last[1]) * 100.0, 1)
-    if matches:
+    if tree:
         _PROC_CPU_LAST[station.station_id] = (jiffies, now)
     else:
         _PROC_CPU_LAST.pop(station.station_id, None)
 
     return {
-        "capture_alive": bool(matches),
-        "process_count": len(matches),
+        "capture_alive": bool(tree),
+        "process_count": len(tree),
         "main_pid": main_pid,
         # Age of the capture tree's main process. A staggered GRMSUpdater restart
         # (and RMS's own capture_wait_seconds pre-capture sleep) means the tail
