@@ -256,15 +256,15 @@ def evaluate(metrics, thresholds, disabled=()):
              "no astrometry" % (metrics.get("platepar_x_res"), metrics.get("platepar_y_res"),
                                 metrics.get("config_width"), metrics.get("config_height")))
 
-    # --- Capture backend fell back to cv2 (silent perf degradation) ------
+    # --- Capture backend fell back to cv2 ---------------------------------
     # Configured for GStreamer but the log shows it running OpenCV: gst failed to
-    # start, so it's on the cv2 path -- higher CPU, no hardware decode, more prone
-    # to drops. The station looks alive; only the backend tells you.
+    # start. The station looks alive; only the backend tells you it's not on the
+    # configured path.
     if (metrics.get("media_backend") == "gst"
             and metrics.get("capture_backend") == "cv2"):
         flag(DEGRADED, "backend_fallback",
-             "Capture fell back to OpenCV (cv2) -- configured media_backend=gst but "
-             "GStreamer didn't start (higher CPU / no hw decode / more drops)")
+             "Capture fell back to OpenCV (cv2): configured media_backend=gst but "
+             "GStreamer didn't start")
 
     # --- Config FOV outside astrometry.net's solve range (latent) --------
     # config.fov_w is the scale hint for auto-calibration (searches [0.75x,1.5x]).

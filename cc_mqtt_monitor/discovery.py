@@ -62,8 +62,8 @@ class Station:
     # (RcvbufErrors), which we monitor host-wide when any station uses it.
     protocol: str = "tcp"
     # Configured capture backend (RMS default "gst"). If RMS can't bring up
-    # GStreamer it silently falls back to OpenCV (cv2) -- worse CPU / no hw
-    # decode -- which we detect from the log and flag against this.
+    # GStreamer it silently falls back to OpenCV (cv2), which we detect from the
+    # log and flag against this configured value.
     media_backend: str = "gst"
     # Camera resolution from the .config. RMS DISCARDS the platepar entirely if it
     # was fit at a different resolution (no astrometry for that night) -- so a
