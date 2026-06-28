@@ -508,6 +508,11 @@ _WARNING_RE = re.compile(r"-WARNING-")
 # ~60s by the capture watchdog ("daytime_mode_prev=True/False"). This is the only
 # mode signal independent of save_frames/raw saving, so it's the ground truth.
 _DAYTIME_MODE_RE = re.compile(r"daytime_mode_prev=(True|False)")
+# Actual capture backend, from the BufferedCapture init log line. RMS silently
+# falls back from GStreamer to OpenCV (cv2) if gst can't start, so the live log
+# is the only truth. The last init marker in the tail is the current backend.
+_BACKEND_GST_RE = re.compile(r"GStreamer pipeline created!")
+_BACKEND_CV2_RE = re.compile(r"Initialize OpenCV Device|Using OpenCV\.")
 
 # Benign, high-volume RMS warnings ignored by default: computational artifacts
 # or self-recovering races, not operational problems. Operators add more via
@@ -638,6 +643,8 @@ def collect_logs(station, max_lines, warning_ignore=None):
         "pipeline_reconnects": 0,
         "decoder_errors": 0,
         "rms_mode": None,   # RMS's actual day/night mode (ground truth, see below)
+        "media_backend": station.media_backend,   # configured (gst/cv2/v4l2)
+        "capture_backend": None,                   # actual, from the log (gst/cv2)
     }
     log_path = _newest_log(station)
     if not log_path:
@@ -689,6 +696,13 @@ def collect_logs(station, max_lines, warning_ignore=None):
         mode = _DAYTIME_MODE_RE.search(line)
         if mode:
             result["rms_mode"] = "day" if mode.group(1) == "True" else "night"
+
+        # Actual capture backend: last init marker in the tail wins (a gst->cv2
+        # fallback logs the gst attempt then the OpenCV init, so cv2 ends last).
+        if _BACKEND_GST_RE.search(line):
+            result["capture_backend"] = "gst"
+        elif _BACKEND_CV2_RE.search(line):
+            result["capture_backend"] = "cv2"
 
     # Peak buffer fill in the recent window -- the back-pressure signal, since the
     # fill at the drop line has usually recovered to baseline. Prefer the

@@ -32,6 +32,9 @@ Distinguish the two `health` shapes by payload:
   ~1 km); present only when the RMS `.config` has coordinates. For dashboard maps.
 - `alt_centre`, `az_centre` — camera pointing (centre of field), whole degrees,
   from the station's platepar; present only when the platepar is readable.
+- `capture_backend` (`gst`|`cv2`|`null`) + `media_backend` (configured) — the
+  actual vs configured capture backend; a `gst`-configured station running `cv2`
+  has silently fallen back (see the `backend_fallback` problem).
 - `rms_mode` — RMS's **actual** day/night capture mode: `day` | `night` | `null`
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.

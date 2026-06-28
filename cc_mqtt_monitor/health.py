@@ -26,6 +26,7 @@ CHECK_KEYS = (
     "detection_stalled",  # capturing but no FTPdetectinfo/CALSTARS produced
     "platepar_mismatch",  # config resolution != platepar -> RMS drops the platepar
     "config_fov_mismatch", # config fov_w can't solve the real FOV (astrometry.net)
+    "backend_fallback",   # configured gst but capture fell back to OpenCV (cv2)
     "timelapse_missing",  # a finished frame session's ffmpeg failed (no mp4)
     "timelapse_overdue",  # saving frames but no timelapse mp4 produced in ages
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
@@ -254,6 +255,16 @@ def evaluate(metrics, thresholds, disabled=()):
              "Platepar resolution %sx%s != config %sx%s -- RMS discards the platepar, "
              "no astrometry" % (metrics.get("platepar_x_res"), metrics.get("platepar_y_res"),
                                 metrics.get("config_width"), metrics.get("config_height")))
+
+    # --- Capture backend fell back to cv2 (silent perf degradation) ------
+    # Configured for GStreamer but the log shows it running OpenCV: gst failed to
+    # start, so it's on the cv2 path -- higher CPU, no hardware decode, more prone
+    # to drops. The station looks alive; only the backend tells you.
+    if (metrics.get("media_backend") == "gst"
+            and metrics.get("capture_backend") == "cv2"):
+        flag(DEGRADED, "backend_fallback",
+             "Capture fell back to OpenCV (cv2) -- configured media_backend=gst but "
+             "GStreamer didn't start (higher CPU / no hw decode / more drops)")
 
     # --- Config FOV outside astrometry.net's solve range (latent) --------
     # config.fov_w is the scale hint for auto-calibration (searches [0.75x,1.5x]).

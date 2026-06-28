@@ -61,6 +61,10 @@ class Station:
     # RTSP transport ("tcp"/"udp"). UDP can overflow the kernel receive buffer
     # (RcvbufErrors), which we monitor host-wide when any station uses it.
     protocol: str = "tcp"
+    # Configured capture backend (RMS default "gst"). If RMS can't bring up
+    # GStreamer it silently falls back to OpenCV (cv2) -- worse CPU / no hw
+    # decode -- which we detect from the log and flag against this.
+    media_backend: str = "gst"
     # Camera resolution from the .config. RMS DISCARDS the platepar entirely if it
     # was fit at a different resolution (no astrometry for that night) -- so a
     # mismatch vs the platepar X_res/Y_res is a silent, data-killing failure.
@@ -174,6 +178,7 @@ def _station_from_config(config_path):
     camera_group_name = group if group and group.lower() != "none" else None
 
     protocol = (cfg.get("protocol") or "tcp").strip().lower()
+    media_backend = (cfg.get("media_backend") or "gst").strip().lower()
     device_url = (cfg.get("device") or "").strip() or None
     config_width = int(_as_float(cfg.get("width")))
     config_height = int(_as_float(cfg.get("height")))
@@ -209,6 +214,7 @@ def _station_from_config(config_path):
         elevation=elevation,
         capture_wait_seconds=capture_wait_seconds,
         protocol=protocol,
+        media_backend=media_backend,
         device_url=device_url,
         camera_host=_camera_host(device_url),
     )

@@ -69,6 +69,7 @@ the human-readable text.
 | `detection_stalled` | error | capturing FF but no `FTPdetectinfo`/`CALSTARS` produced | `detection_grace_s` (1800s) |
 | `platepar_mismatch` | error | `.config` resolution ≠ platepar `X_res`/`Y_res` — RMS discards the platepar, so the night gets **no astrometric calibration** (silent data killer) | — |
 | `config_fov_mismatch` | degraded | the real FOV (platepar `fov_h`) is outside `[0.75×, 1.5×] config.fov_w` — astrometry.net's solve range, so a fresh auto-calibration would fail (latent; existing platepar still works) | — |
+| `backend_fallback` | degraded | configured `media_backend: gst` but the log shows capture running on OpenCV (`cv2`) — GStreamer didn't start (higher CPU, no hw decode, more drops) | — |
 | `timelapse_missing` | degraded | a completed frame session's ffmpeg failed — its `_frametimes.json` exists but no `_frames_timelapse.mp4` | `timelapse_grace_s` (1h) |
 | `timelapse_overdue` | degraded | saving frames but no `_frames_timelapse.mp4` produced in ages (generation not running at all; latitude-independent) | `timelapse_max_age_s` (30h) |
 | `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault in the log | — |
