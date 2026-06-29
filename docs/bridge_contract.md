@@ -35,6 +35,10 @@ Distinguish the two `health` shapes by payload:
 - `capture_backend` (`gst`|`cv2`|`null`) + `media_backend` (configured) — the
   actual vs configured capture backend; a `gst`-configured station running `cv2`
   has silently fallen back (see the `backend_fallback` problem).
+- `disconnects_session` + `watchdog_restarts_session` (int|null) — stream
+  instability counters since the current day/night capture session began (reset
+  at each day<->night transition): unplanned stream drops that forced a reconnect,
+  and RMS capture-watchdog restarts. Informational; 0 on a healthy stream.
 - `rms_mode` — RMS's **actual** day/night capture mode: `day` | `night` | `null`
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.

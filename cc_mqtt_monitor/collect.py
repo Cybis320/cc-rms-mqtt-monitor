@@ -514,6 +514,16 @@ _DAYTIME_MODE_RE = re.compile(r"daytime_mode_prev=(True|False)")
 _BACKEND_GST_RE = re.compile(r"GStreamer pipeline created!")
 _BACKEND_CV2_RE = re.compile(r"Initialize OpenCV Device|Using OpenCV\.")
 
+# Per-session capture-stability counters (reset at each RMS day<->night
+# transition, where RMS resets its own counters too):
+#   - unplanned disconnect: the stream dropped and forced a reconnect (distinct
+#     from the planned mode-switch resource release).
+#   - watchdog restart: RMS's capture watchdog restarted the BufferedCapture
+#     process; the log carries a per-mode-session "restart #N" running count.
+_TRANSITION_RE = re.compile(r"transition detected")           # day<->night boundary
+_DISCONNECT_RE = re.compile(r"video device is probably disconnected")
+_WD_RESTART_RE = re.compile(r"WATCHDOG: Restarting BufferedCapture.*restart #(\d+)")
+
 # Benign, high-volume RMS warnings ignored by default: computational artifacts
 # or self-recovering races, not operational problems. Operators add more via
 # config `log_warning_ignore` (these defaults always apply).
@@ -717,6 +727,43 @@ def collect_logs(station, max_lines, warning_ignore=None):
         if recent:
             result["buffer_fill_max_recent"] = round(max(recent), 1)
 
+    return result
+
+
+def collect_capture_events(station):
+    """Capture-stability counts for the CURRENT day/night session.
+
+    Streams the whole current log (the buffer/dropped tail in collect_logs is too
+    short to span a multi-hour session) and resets the counters at each RMS
+    day<->night transition -- so the result is "since this session began", the
+    same boundary RMS uses to reset its own counters:
+      disconnects_session       -- unplanned stream drops that forced a reconnect
+                                   (not the planned mode-switch release)
+      watchdog_restarts_session -- RMS capture-watchdog restarts (from its own
+                                   per-session "restart #N", so it's exact even if
+                                   earlier restart lines have scrolled away)
+    Both null if the log can't be read. O(1) memory (line-streamed).
+    """
+    result = {"disconnects_session": None, "watchdog_restarts_session": None}
+    log_path = _newest_log(station)
+    if not log_path:
+        return result
+    disc, wd = 0, 0
+    try:
+        with open(log_path, errors="replace") as fh:
+            for line in fh:
+                if _TRANSITION_RE.search(line):
+                    disc, wd = 0, 0          # new session -> reset (as RMS does)
+                elif _DISCONNECT_RE.search(line):
+                    disc += 1
+                else:
+                    m = _WD_RESTART_RE.search(line)
+                    if m:
+                        wd = max(wd, int(m.group(1)))   # RMS's running restart #N
+    except (IOError, OSError):
+        return result
+    result["disconnects_session"] = disc
+    result["watchdog_restarts_session"] = wd
     return result
 
 
@@ -1003,6 +1050,7 @@ def collect_station(station, max_log_lines, now=None, warning_ignore=None):
     metrics.update(collect_stream_bandwidth(station, now))
     metrics.update(collect_detection(station, now))
     metrics.update(collect_logs(station, max_log_lines, warning_ignore))
+    metrics.update(collect_capture_events(station))
     metrics.update(collect_summary(station))
     metrics.update(collect_upload(station, now))
     metrics.update(collect_disk(station))
