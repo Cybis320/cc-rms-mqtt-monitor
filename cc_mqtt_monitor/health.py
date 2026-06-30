@@ -22,6 +22,7 @@ _RANK = {OK: 0, DEGRADED: 1, ERROR: 2}
 # Stable keys for every trigger, usable in config `disabled_checks`.
 CHECK_KEYS = (
     "capture_down",       # capture process for the station not running
+    "data_unreadable",    # process alive but data_dir not readable (perms/other user)
     "capture_stalled",    # no FF (night) / no frames (day) within the threshold
     "detection_stalled",  # capturing but no FTPdetectinfo/CALSTARS produced
     "platepar_mismatch",  # config resolution != platepar -> RMS drops the platepar
@@ -201,6 +202,19 @@ def evaluate(metrics, thresholds, disabled=()):
     if not metrics.get("capture_alive"):
         flag(ERROR, "capture_down", "Capture process not running")
         # Process down -> downstream freshness checks are moot.
+        return state["status"], state["problems"]
+
+    # --- Data not readable (multi-user permission denial) ----------------
+    # The process is alive (seen via /proc, which is cross-user), but we can't
+    # read its data_dir -- and the ~/RMS_data fallback wasn't readable either. So
+    # logs/FF/detections are all blank; report THAT, not a phantom stall, and skip
+    # the data-dependent checks below (they'd false-fire on empty data).
+    if metrics.get("data_dir_readable") is False:
+        flag(DEGRADED, "data_unreadable",
+             "Capture is running but the monitor can't read its data_dir "
+             "(permission denied) -- RMS likely runs as a different user; make the "
+             "data tree readable to the monitor's user (shared group + g+rX), or "
+             "expose a readable copy at ~/RMS_data/<id>")
         return state["status"], state["problems"]
 
     # --- Capture liveness (expect the right output for day/night) --------

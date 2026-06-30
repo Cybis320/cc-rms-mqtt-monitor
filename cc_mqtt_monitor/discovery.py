@@ -163,10 +163,28 @@ def _camera_host(device_url):
     return host or None
 
 
+def _readable_dir(d):
+    """True if d is a directory the monitor's user can list and traverse
+    (follows symlinks, so it reflects the real target's permissions)."""
+    return bool(d) and os.path.isdir(d) and os.access(d, os.R_OK | os.X_OK)
+
+
 def _station_from_config(config_path):
     cfg = _read_config(config_path)
     station_id = cfg.get("stationID") or os.path.basename(os.path.dirname(config_path))
     data_dir = os.path.expanduser(cfg.get("data_dir", _DEFAULTS["data_dir"]))
+    # Multi-user fallback: if the configured data_dir isn't readable by the
+    # monitor's user (each RMS instance can run as a separate user with private
+    # data), try the conventional ~/RMS_data/<id> then ~/RMS_data in the monitor's
+    # OWN home, which the operator can keep readable. Only switch to a path that is
+    # actually readable; if none is, keep the configured one (health then flags it
+    # as a permission problem rather than silently looking dead).
+    if not _readable_dir(data_dir):
+        for alt in (os.path.expanduser(os.path.join(_DEFAULTS["data_dir"], station_id)),
+                    os.path.expanduser(_DEFAULTS["data_dir"])):
+            if alt != data_dir and _readable_dir(alt):
+                data_dir = alt
+                break
     # RMS accepts latitude/longitude or the short lat/lon keys.
     latitude = _as_float(cfg.get("latitude", cfg.get("lat")))
     longitude = _as_float(cfg.get("longitude", cfg.get("lon")))

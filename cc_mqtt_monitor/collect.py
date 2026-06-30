@@ -198,6 +198,23 @@ def collect_process(station):
     }
 
 
+def collect_data_access(station):
+    """Whether the monitor can actually READ the station's (post-fallback)
+    data_dir. False = it exists but permission is denied -- the case where an
+    RMS instance runs as a different user with private, non-group-readable data
+    and no readable copy is exposed, so logs/FF/detections all come back empty
+    and the station would otherwise look dead. None when undeterminable."""
+    result = {"data_dir_readable": None}
+    try:
+        os.listdir(station.data_dir)
+        result["data_dir_readable"] = True
+    except PermissionError:
+        result["data_dir_readable"] = False
+    except OSError:
+        pass        # missing/other -> leave None (handled by the freshness checks)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Capture freshness
 # ---------------------------------------------------------------------------
@@ -1090,6 +1107,7 @@ def collect_station(station, max_log_lines, now=None, warning_ignore=None):
     metrics.update(collect_timelapse(station, now))
     metrics.update(collect_stream_bandwidth(station, now))
     metrics.update(collect_detection(station, now))
+    metrics.update(collect_data_access(station))
     metrics.update(collect_logs(station, max_log_lines, warning_ignore))
     metrics.update(collect_capture_events(station))
     metrics.update(collect_summary(station))

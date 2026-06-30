@@ -61,7 +61,7 @@ maintenance_file: null             # optional GRMSUpdater lock path to clean up
 group: null
 
 # Health checks to silence (by key), e.g. [dropped_frames, upload_backlog].
-# Empty = all on. Keys: capture_down, capture_stalled, detection_stalled,
+# Empty = all on. Keys: capture_down, data_unreadable, capture_stalled, detection_stalled,
 # platepar_mismatch, config_fov_mismatch, backend_fallback,
 # timelapse_missing, timelapse_overdue, log_fatal, log_warning, watchdog,
 # disk_low, upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames,
