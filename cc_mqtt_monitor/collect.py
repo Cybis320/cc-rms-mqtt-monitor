@@ -862,6 +862,32 @@ def _git(rms_dir, *args):
     return (out.stdout or "").strip() or None
 
 
+# Strip any embedded userinfo (https://user:token@host -> https://host) before
+# publishing a remote URL to the open feed -- public RMS clones have none, but
+# this guards a checkout configured with credentials in the URL.
+_URL_CRED_RE = re.compile(r"(://)[^/@]+@")
+
+
+def rms_remote(rms_dir):
+    """URL of the RMS checkout's remote -- the repo it pulls from (usually
+    'origin'; the current branch's configured remote if set, else origin, else
+    the first remote). Read-only and offline. None if not a git repo / no remote.
+    Any URL-embedded credentials are stripped before it's returned."""
+    rms_dir = os.path.expanduser(rms_dir or "")
+    if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
+        return None
+    branch = _git(rms_dir, "rev-parse", "--abbrev-ref", "HEAD")
+    tracked = _git(rms_dir, "config", "branch.%s.remote" % branch) if branch and branch != "HEAD" else None
+    candidates = [tracked, "origin"] + (_git(rms_dir, "remote") or "").split()
+    for r in candidates:
+        if not r:
+            continue
+        url = _git(rms_dir, "remote", "get-url", r)
+        if url:
+            return _URL_CRED_RE.sub(r"\1", url)
+    return None
+
+
 def _resolve_upstream(rms_dir, branch):
     """(remote, upstream_branch) for `branch`, mirroring RMS_Update.sh's
     resolve_branch_remote(): the configured @{upstream} if set (handles

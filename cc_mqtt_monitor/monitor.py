@@ -5,7 +5,7 @@ import time
 import logging
 
 from .discovery import discover_stations
-from .collect import collect_station, rms_branch, rms_repo_status
+from .collect import collect_station, rms_branch, rms_remote, rms_repo_status
 from .oslevel import collect_host, iface_for_ip
 from .health import build_state, build_host_state
 from . import maintenance
@@ -64,6 +64,7 @@ def gather(config, maint=None, host_metrics=None):
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     now = time.time()
     branch = rms_branch(config.rms_dir)        # host-wide RMS git branch (one checkout)
+    remote = rms_remote(config.rms_dir)        # host-wide RMS remote URL (pull source)
     repo = rms_repo_status(config.rms_dir)     # {rms_up_to_date, rms_behind_days} vs remote
     states = []
     for station in stations:
@@ -87,6 +88,8 @@ def gather(config, maint=None, host_metrics=None):
         state["maintenance_reason"] = maint_reason
         if branch:
             state["rms_branch"] = branch     # which RMS code the station is running
+        if remote:
+            state["rms_remote"] = remote     # repo it pulls from (origin URL)
         state.update(repo)                   # rms_up_to_date + rms_behind_days (host-wide)
         # Approximate coordinates for the dashboard map: obfuscated to ~1 km
         # (2 decimals). Omitted entirely when the .config has no coords.
@@ -123,6 +126,9 @@ def gather_host(config, maint=None):
     branch = rms_branch(config.rms_dir)
     if branch:
         state["rms_branch"] = branch
+    remote = rms_remote(config.rms_dir)
+    if remote:
+        state["rms_remote"] = remote
     state.update(rms_repo_status(config.rms_dir))  # rms_up_to_date + rms_behind_days
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     state["maintenance"] = maint

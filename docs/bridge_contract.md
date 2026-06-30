@@ -47,6 +47,8 @@ Distinguish the two `health` shapes by payload:
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.
 - `rms_branch` — RMS git branch the checkout is on (host-wide).
+- `rms_remote` — URL of the repo the RMS checkout pulls from (origin; host-wide;
+  URL-embedded credentials stripped).
 - `rms_up_to_date` (bool) — HEAD is exactly the live remote tip (ls-remote vs HEAD).
 - `rms_update_age_days` (float) — days since this checkout last actually pulled new
   code (reflog age). This is the "is the updater keeping up?" signal — NOT a
