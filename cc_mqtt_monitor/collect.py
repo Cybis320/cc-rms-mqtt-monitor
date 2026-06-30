@@ -523,6 +523,11 @@ _BACKEND_CV2_RE = re.compile(r"Initialize OpenCV Device|Using OpenCV\.")
 _TRANSITION_RE = re.compile(r"transition detected")           # day<->night boundary
 _DISCONNECT_RE = re.compile(r"video device is probably disconnected")
 _WD_RESTART_RE = re.compile(r"WATCHDOG: Restarting BufferedCapture.*restart #(\d+)")
+# Real-time per-FF meteor count, logged as each FF is processed ("...detected
+# meteors: N"); summed over the session = live meteor total. Matches the
+# end-of-night "TOTAL: N" line. (Note the colon: this does NOT match the summary
+# line "TOTAL: N detected meteors.", which has no "detected meteors:<num>".)
+_METEOR_RE = re.compile(r"detected meteors:\s*(\d+)")
 
 # Benign, high-volume RMS warnings ignored by default: computational artifacts
 # or self-recovering races, not operational problems. Operators add more via
@@ -742,28 +747,38 @@ def collect_capture_events(station):
       watchdog_restarts_session -- RMS capture-watchdog restarts (from its own
                                    per-session "restart #N", so it's exact even if
                                    earlier restart lines have scrolled away)
-    Both null if the log can't be read. O(1) memory (line-streamed).
+      meteors_session           -- meteors detected this session (sum of the
+                                   real-time per-FF "detected meteors: N"); a live
+                                   running total for flux on the dashboard
+    All null if the log can't be read. O(1) memory (line-streamed).
     """
-    result = {"disconnects_session": None, "watchdog_restarts_session": None}
+    result = {"disconnects_session": None, "watchdog_restarts_session": None,
+              "meteors_session": None}
     log_path = _newest_log(station)
     if not log_path:
         return result
-    disc, wd = 0, 0
+    disc, wd, met = 0, 0, 0
     try:
         with open(log_path, errors="replace") as fh:
             for line in fh:
                 if _TRANSITION_RE.search(line):
-                    disc, wd = 0, 0          # new session -> reset (as RMS does)
-                elif _DISCONNECT_RE.search(line):
+                    disc, wd, met = 0, 0, 0      # new session -> reset (as RMS does)
+                    continue
+                if _DISCONNECT_RE.search(line):
                     disc += 1
-                else:
-                    m = _WD_RESTART_RE.search(line)
-                    if m:
-                        wd = max(wd, int(m.group(1)))   # RMS's running restart #N
+                    continue
+                m = _WD_RESTART_RE.search(line)
+                if m:
+                    wd = max(wd, int(m.group(1)))   # RMS's running restart #N
+                    continue
+                m = _METEOR_RE.search(line)
+                if m:
+                    met += int(m.group(1))
     except (IOError, OSError):
         return result
     result["disconnects_session"] = disc
     result["watchdog_restarts_session"] = wd
+    result["meteors_session"] = met
     return result
 
 

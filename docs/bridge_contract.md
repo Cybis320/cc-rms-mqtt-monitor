@@ -39,6 +39,10 @@ Distinguish the two `health` shapes by payload:
   instability counters since the current day/night capture session began (reset
   at each day<->night transition): unplanned stream drops that forced a reconnect,
   and RMS capture-watchdog restarts. Informational; 0 on a healthy stream.
+- `meteors_session` (int|null) — meteors detected so far this session (live
+  running total, resets at each day<->night transition; 0 by day). Matches RMS's
+  end-of-night `TOTAL`. For a live meteor rate / flux indicator on the dashboard
+  (true flux also needs collecting area + limiting magnitude, which aren't live).
 - `rms_mode` — RMS's **actual** day/night capture mode: `day` | `night` | `null`
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.
