@@ -20,6 +20,7 @@ Per station, each cycle (default 60 s):
 
 | Signal | What it catches |
 |---|---|
+| **Camera reachable** | camera unpingable while output is stalled → collapses to one "camera not pingable" root cause (instead of a cascade of downstream errors) and drops to cheap-ping **standby** until it returns |
 | **Capture process alive** | `RMS.StartCapture` for that station's config is gone |
 | **Mode-aware freshness** | knows from `.config` (`continuous_capture`, `switch_camera_modes`, `save_frames`) + computed **sun elevation** whether to expect `FF_*.fits` (night) or `FramesFiles/*_d.jpg` frame images (day); flags the *right* output going stale and never false-alarms on the idle pipeline |
 | **Silent pipeline failure** | capturing fine but **no `FTPdetectinfo`/`CALSTARS`** produced — the general case of "a missing `.so` / import error broke detection but capture looks alive" |
@@ -64,6 +65,7 @@ the human-readable text.
 
 | Key | Severity | Fires when | Threshold |
 |---|---|---|---|
+| `camera_unreachable` | error | the camera hasn't answered a ping for a sustained window **while output is stalled** — the root cause of a whole symptom cascade. Collapses the record to this one line (outranking even `capture_down`) and drops the station to cheap-ping-only **standby** until it answers. Stall-gated, so a camera that merely filters ICMP is never mistaken for down | `camera_unreachable_grace_s` (300s) |
 | `capture_down` | error | the station's `RMS.StartCapture` process isn't running | — |
 | `capture_stalled` | error | expected output is stale — no FF (night) or no frame (continuous day). Suppressed for a settling grace after the capture process (re)starts, so a staggered GRMSUpdater restart doesn't false-alarm | `output_fresh_error_s` (300s); grace `capture_restart_grace_s` (300s) + the station's `capture_wait_seconds` |
 | `detection_stalled` | error | capturing FF but no `FTPdetectinfo`/`CALSTARS` produced | `detection_grace_s` (1800s) |
@@ -209,6 +211,7 @@ Example `health` payload:
   "lat": 43.19,
   "lon": -81.32,
   "capture_alive": true,
+  "camera_standby": false,
   "newest_fits_age_s": 8.2,
   "fits_count": 210,
   "ftpdetect_present": false,

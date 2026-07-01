@@ -46,6 +46,18 @@ Distinguish the two `health` shapes by payload:
 - `rms_mode` — RMS's **actual** day/night capture mode: `day` | `night` | `null`
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.
+- `camera_standby` (bool) — the camera has been unpingable for a sustained window
+  **while output was stalled**, so the monitor has collapsed this record to a
+  single `camera_unreachable` problem (in `problems[]`, severity `error`) and
+  suppressed the whole downstream cascade — including `capture_down`. When
+  `true`, **that one problem is the story**; don't infer additional faults from
+  the sparse record (most other metrics are omitted in standby). It stays `true`
+  every cycle until the camera answers again, so treat entry/exit as the alert
+  and all-clear and don't re-notify while it holds. `camera_unreachable_s` (float,
+  present in standby) is how long it's been unreachable. Absent/`false` on healthy
+  stations. The collapse is done in the monitor (not here) so the dashboard sees
+  the clean record too — the bridge just routes the `camera_unreachable` problem
+  like any other.
 - `rms_branch` — RMS git branch the checkout is on (host-wide).
 - `rms_remote` — URL of the repo the RMS checkout pulls from (origin; host-wide;
   URL-embedded credentials stripped).

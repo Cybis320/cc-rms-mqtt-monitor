@@ -7,11 +7,34 @@ import logging
 from .discovery import discover_stations
 from .collect import collect_station, rms_branch, rms_remote, rms_repo_status
 from .oslevel import collect_host, iface_for_ip
-from .health import build_state, build_host_state
+from .health import build_state, build_host_state, output_stalled
 from . import maintenance
 from . import diagnose
 
 log = logging.getLogger("cc_mqtt_monitor")
+
+# Camera-reachability tracking for standby mode (see gather()). _UNREACHABLE maps
+# station_id -> monotonic time we FIRST saw it stalled AND not answering a ping;
+# _STANDBY is the set currently collapsed to camera-unreachable, re-probed with a
+# cheap ping only (skipping the expensive log-streaming collectors) until it
+# answers again. In-process only: a monitor restart just re-enters standby within
+# a couple of cycles, so there's nothing worth persisting.
+_UNREACHABLE = {}
+_STANDBY = set()
+
+
+def _track_unreachable(station_id, stalled, reachable, now_mono, grace_s):
+    """Advance the sustained 'stalled AND not pinging' clock for one station.
+    Returns (standby, seconds_unreachable). The clock clears -- and standby ends
+    -- on any of: not stalled, the camera answers (True), or the ping is
+    undeterminable (None). So we only ever stand by on a definite, sustained
+    no-ping while output is stalled."""
+    if stalled and reachable is False:
+        since = _UNREACHABLE.setdefault(station_id, now_mono)
+        secs = now_mono - since
+        return secs >= grace_s, secs
+    _UNREACHABLE.pop(station_id, None)
+    return False, None
 
 
 def _iso(ts):
@@ -63,24 +86,14 @@ def gather(config, maint=None, host_metrics=None):
     disabled = set(config.disabled_checks or [])
     maint, maint_reason = maint if maint is not None else maintenance.detect(config)
     now = time.time()
+    mono = time.monotonic()                    # standby clock (immune to wall jumps)
+    grace = config.thresholds.camera_unreachable_grace_s
     branch = rms_branch(config.rms_dir)        # host-wide RMS git branch (one checkout)
     remote = rms_remote(config.rms_dir)        # host-wide RMS remote URL (pull source)
     repo = rms_repo_status(config.rms_dir)     # {rms_up_to_date, rms_out_of_date_days} vs remote
-    states = []
-    for station in stations:
-        metrics = collect_station(station, config.log_tail_lines, now,
-                                  config.log_warning_ignore)
-        # Adaptive escalation: when this station is dropping frames the cheap
-        # host signals can't explain, spend a heavy probe (keyframe + ping) to
-        # confirm the camera/link verdict -- rate-limited/backed-off per station.
-        if config.enable_adaptive_probe and diagnose.should_escalate(
-                station, metrics, host_metrics, config.thresholds):
-            log.info("%s: drops unexplained on host; running diagnostic probe",
-                     station.station_id)
-            metrics.update(diagnose.run_probe(station, now))
-            diagnose.note_escalation(station, config.thresholds)
-        state = build_state(metrics, config.thresholds, config.host_name,
-                            _iso(now), disabled, host_metrics)
+
+    def decorate(state, station):
+        """Add the host-wide + station-static fields shared by every record."""
         group = _station_group(station, config)
         state["group"] = group               # human-readable label
         state["group_slug"] = _slug(group)   # canonical subscription handle
@@ -96,7 +109,60 @@ def gather(config, maint=None, host_metrics=None):
         if station.has_location:
             state["lat"] = round(station.latitude, 2)
             state["lon"] = round(station.longitude, 2)
-        states.append(state)
+        return state
+
+    states = []
+    for station in stations:
+        sid = station.station_id
+        # Standby fast-path: a station already collapsed to camera-unreachable is
+        # re-checked with just a cheap ping -- we skip the expensive collectors
+        # (whole-log streaming, FF globbing, probes) while nothing useful can be
+        # happening, and stay in standby until the camera answers again.
+        if sid in _STANDBY:
+            reachable = diagnose.camera_reachable(station)
+            if reachable is False:
+                _, secs = _track_unreachable(sid, True, False, mono, grace)
+                metrics = {"station_id": sid, "camera_host": station.camera_host,
+                           "camera_ping_ok": False, "camera_standby": True,
+                           "camera_unreachable_s": round(secs, 1)}
+                state = build_state(metrics, config.thresholds, config.host_name,
+                                    _iso(now), disabled, host_metrics)
+                states.append(decorate(state, station))
+                continue
+            _STANDBY.discard(sid)
+            _track_unreachable(sid, False, reachable, mono, grace)   # clear the clock
+            # recovered (or ping now undeterminable) -> fall through to full collect
+
+        metrics = collect_station(station, config.log_tail_lines, now,
+                                  config.log_warning_ignore)
+        # Adaptive escalation: when this station is dropping frames the cheap
+        # host signals can't explain, spend a heavy probe (keyframe + ping) to
+        # confirm the camera/link verdict -- rate-limited/backed-off per station.
+        if config.enable_adaptive_probe and diagnose.should_escalate(
+                station, metrics, host_metrics, config.thresholds):
+            log.info("%s: drops unexplained on host; running diagnostic probe", sid)
+            metrics.update(diagnose.run_probe(station, now))
+            diagnose.note_escalation(station, config.thresholds)
+
+        # Camera reachability, stall-gated: only spend a ping when output is
+        # actually stalled -- a healthy producer that merely filters ICMP is left
+        # alone. Sustained (stalled AND no-ping) collapses the record to one
+        # camera-down root cause (see evaluate) and drops into standby.
+        stalled = output_stalled(metrics, config.thresholds)
+        reachable = diagnose.camera_reachable(station) if stalled else None
+        standby, secs = _track_unreachable(sid, stalled, reachable, mono, grace)
+        metrics["camera_standby"] = standby
+        if reachable is not None:
+            metrics["camera_host"] = station.camera_host
+            metrics["camera_ping_ok"] = reachable
+        if secs is not None:
+            metrics["camera_unreachable_s"] = round(secs, 1)
+        if standby:
+            _STANDBY.add(sid)
+
+        state = build_state(metrics, config.thresholds, config.host_name,
+                            _iso(now), disabled, host_metrics)
+        states.append(decorate(state, station))
     return states
 
 

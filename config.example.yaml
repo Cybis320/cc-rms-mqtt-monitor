@@ -61,7 +61,7 @@ maintenance_file: null             # optional GRMSUpdater lock path to clean up
 group: null
 
 # Health checks to silence (by key), e.g. [dropped_frames, upload_backlog].
-# Empty = all on. Keys: capture_down, data_unreadable, capture_stalled, detection_stalled,
+# Empty = all on. Keys: camera_unreachable, capture_down, data_unreadable, capture_stalled, detection_stalled,
 # platepar_mismatch, config_fov_mismatch, backend_fallback,
 # timelapse_missing, timelapse_overdue, log_fatal, log_warning, watchdog,
 # disk_low, upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames,
@@ -129,3 +129,8 @@ thresholds:
   ping_loss_warn_pct: 1.0        # probed sustained loss to the camera
   probe_min_interval_s: 600      # min gap between escalated probes per station
   probe_max_interval_s: 3600     # backoff ceiling while a camera stays bad
+  camera_unreachable_grace_s: 300 # a station stalled AND not answering a ping for
+                                 # this long collapses to one "camera not pingable"
+                                 # alert (suppressing the downstream cascade) and
+                                 # drops to cheap-ping-only cycles. Transient
+                                 # outages inside the window alert normally.

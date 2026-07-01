@@ -123,6 +123,30 @@ def probe_network(station, count=20, interval=0.05, timeout=15):
     return result
 
 
+def camera_reachable(station, count=2, timeout=4):
+    """Cheap camera-liveness ping used to corroborate a capture stall as a
+    camera-down root cause -- NOT the heavy loss-measuring probe_network(). Two
+    quick packets: True if the camera answers, False if ping ran but nothing
+    answered, None if undeterminable (no camera host, ping missing, DNS/error).
+    None (can't tell) never triggers standby, so an ICMP-blocked-but-working
+    camera is never mistaken for a dead one."""
+    host = station.camera_host
+    if not host or not _have("ping"):
+        return None
+    try:
+        out = subprocess.run(
+            ["ping", "-n", "-c", str(count), "-W", "1", host],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=timeout, universal_newlines=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode == 0:
+        return True
+    if out.returncode == 1:      # ran cleanly, zero replies -> genuinely down
+        return False
+    return None                  # 2+ (unknown host, permission, etc.) -> unclear
+
+
 def run_probe(station, now=None):
     """Run every heavy probe for a station and merge the results into one dict."""
     result = {}

@@ -21,6 +21,7 @@ _RANK = {OK: 0, DEGRADED: 1, ERROR: 2}
 
 # Stable keys for every trigger, usable in config `disabled_checks`.
 CHECK_KEYS = (
+    "camera_unreachable", # camera not pingable for a sustained window (root cause)
     "capture_down",       # capture process for the station not running
     "data_unreadable",    # process alive but data_dir not readable (perms/other user)
     "capture_stalled",    # no FF (night) / no frames (day) within the threshold
@@ -68,6 +69,57 @@ def _num(metrics, key):
 
 def _hot(value, threshold):
     return value is not None and value > threshold
+
+
+def _fmt_dur(secs):
+    """Human-friendly duration for a problem string ('7m', '2h 5m')."""
+    if secs is None:
+        return "a while"
+    secs = int(secs)
+    if secs < 60:
+        return "%ds" % secs
+    if secs < 3600:
+        return "%dm" % (secs // 60)
+    return "%dh %dm" % (secs // 3600, (secs % 3600) // 60)
+
+
+def _resolve_expected(metrics, thresholds):
+    """The output RMS should be producing right now: 'ff' | 'frames' | 'idle'.
+    Prefers the sun+mode value; falls back to the camera's frame tag then the
+    session-active heuristic (mirrors the historical inline logic in evaluate)."""
+    expected = metrics.get("expected_output")
+    if expected is not None:
+        return expected
+    frame_mode = metrics.get("frame_mode")
+    if frame_mode == "night":
+        return "ff"
+    if frame_mode == "day":
+        return "frames"
+    session_age = metrics.get("capture_session_age_s")
+    if session_age is not None and session_age <= thresholds.capture_active_window_s:
+        return "ff"
+    return "idle"
+
+
+def output_stalled(metrics, thresholds):
+    """True when RMS should be producing output (FF at night / frames by day) but
+    hasn't within output_fresh_error_s -- the `capture_stalled` predicate factored
+    out so the monitor loop can stall-gate the camera-reachability ping on it
+    (honouring the same post-restart settling grace). An idle pipeline (nothing
+    expected) is never 'stalled'."""
+    capture_age = metrics.get("capture_age_s")
+    restart_grace = (thresholds.capture_restart_grace_s
+                     + (metrics.get("capture_wait_seconds") or 0))
+    if capture_age is not None and capture_age < restart_grace:
+        return False
+    expected = _resolve_expected(metrics, thresholds)
+    if expected == "ff":
+        age = metrics.get("newest_fits_age_s")
+    elif expected == "frames":
+        age = metrics.get("newest_frame_age_s")
+    else:
+        return False
+    return age is not None and age >= thresholds.output_fresh_error_s
 
 
 def classify_drops(metrics, host_metrics, thresholds):
@@ -198,6 +250,22 @@ def evaluate(metrics, thresholds, disabled=()):
     """Return (status, problems) for a station's metrics dict."""
     flag, state = _flagger(disabled)
 
+    # --- Camera unreachable (root cause; collapses the whole cascade) ----
+    # When the camera itself hasn't answered a ping for a sustained window (the
+    # monitor loop stall-gates and times this, setting camera_standby), the fault
+    # is the wire/power/camera. NOTHING downstream matters -- not the stall, not
+    # the missing detections/drops/watchdog, not even whether StartCapture is
+    # still running -- they all follow from the camera being gone. Report the one
+    # root cause and stop. Done here in the monitor (not the bridge) so EVERY
+    # consumer, the dashboard included, sees the collapsed record rather than the
+    # cascade of downstream symptoms.
+    if metrics.get("camera_standby"):
+        flag(ERROR, "camera_unreachable",
+             "Camera %s not pingable for %s -- capture/detection checks suppressed "
+             "while it's unreachable" % (metrics.get("camera_host") or "camera",
+                                         _fmt_dur(metrics.get("camera_unreachable_s"))))
+        return state["status"], state["problems"]
+
     # --- Capture process -------------------------------------------------
     if not metrics.get("capture_alive"):
         flag(ERROR, "capture_down", "Capture process not running")
@@ -224,7 +292,7 @@ def evaluate(metrics, thresholds, disabled=()):
     fits_age = metrics.get("newest_fits_age_s")
     frame_age = metrics.get("newest_frame_age_s")
     session_age = metrics.get("capture_session_age_s")
-    expected = metrics.get("expected_output")     # ff/frames/idle/transition/None
+    expected = _resolve_expected(metrics, thresholds)  # ff/frames/idle/transition
 
     # Settling grace: a just-(re)started capture has no fresh output yet, and its
     # newest FF/frame on disk is from before the restart (age spans the downtime).
@@ -238,20 +306,6 @@ def evaluate(metrics, thresholds, disabled=()):
     restart_grace = (thresholds.capture_restart_grace_s
                      + (metrics.get("capture_wait_seconds") or 0))
     settling = capture_age is not None and capture_age < restart_grace
-
-    # Fallback when the station has no lat/lon: use the camera's own _d/_n frame
-    # tag, then the session-active heuristic.
-    if expected is None:
-        frame_mode = metrics.get("frame_mode")
-        if frame_mode == "night":
-            expected = "ff"
-        elif frame_mode == "day":
-            expected = "frames"
-        elif (session_age is not None
-              and session_age <= thresholds.capture_active_window_s):
-            expected = "ff"   # a session is running but no frame tag -> assume FF
-        else:
-            expected = "idle"
 
     if (expected == "ff" and fits_age is not None
             and fits_age >= thresholds.output_fresh_error_s and not settling):

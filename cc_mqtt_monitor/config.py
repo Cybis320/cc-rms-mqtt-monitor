@@ -135,6 +135,12 @@ class Thresholds:
     # the camera stays bad -- so a persistently-bad stream is never re-hammered.
     probe_min_interval_s: int = 600
     probe_max_interval_s: int = 3600
+    # Camera-unreachable standby: how long a station must be BOTH stalled AND
+    # failing to answer a ping before the monitor collapses its record to a single
+    # "camera not pingable" root cause (suppressing the downstream cascade) and
+    # drops it to cheap-ping-only cycles. Transient outages inside this window
+    # still alert normally (capture_stalled/capture_down).
+    camera_unreachable_grace_s: int = 300
 
 
 @dataclass
