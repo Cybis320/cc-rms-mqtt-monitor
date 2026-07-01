@@ -50,6 +50,17 @@ Distinguish the two `health` shapes by payload:
 - `rms_remote` — URL of the repo the RMS checkout pulls from (origin; host-wide;
   URL-embedded credentials stripped).
 - `rms_up_to_date` (bool) — HEAD is exactly the live remote tip (ls-remote vs HEAD).
+- `rms_head` (string) — the checkout's current commit SHA, from a purely **local**
+  `git rev-parse HEAD` (**no fetch, no pull, not even an ls-remote** — zero network
+  on the station; host-wide). Lets the box compute staleness **exactly**: the box
+  watches the branch ref with its own `ls-remote` polling and measures "behind" as
+  `now − when the tip first moved off this exact `rms_head``. Immune to (a)
+  commit-date/merge quirks and (b) how often — or whether — the *station* re-checks:
+  a station can be wrong about `rms_up_to_date` (stale) and the box still gets it
+  right, because it needs only the local HEAD sha. Absent on detached HEAD / no
+  checkout. **Where the box computes staleness this way it is preferred over
+  `rms_out_of_date_days`** below, which is bounded by the monitor's own re-check
+  cadence (a station that notices late under-reports).
 - `rms_out_of_date_days` (float) — how long the checkout has been behind: now minus
   when the monitor **first observed this HEAD to be behind its remote tip** (i.e.
   when the branch ref first moved past it). `0.0` while up to date. This is NOT a
