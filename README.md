@@ -217,6 +217,7 @@ Example `health` payload:
   "disk_free_gb": 5216.1,
   "upload_queue_len": 0,
   "rms_branch": "master",
+  "rms_remote": "https://github.com/CroatianMeteorNetwork/RMS.git",
   "rms_up_to_date": true,
   "rms_update_age_days": 0.3,
   "host": "us005-host",
@@ -253,10 +254,37 @@ published — they'd carry every station's traffic. The network codes
 The host record carries `groups` + `group_slugs` + `station_ids`, so host-level
 (OOM/memory) alerts fan out to the same group and prefix handles.
 
+### Also: by problem type (the category axis)
+
+The handles above are the **station axis** — *whose* station it is. There is a
+second, orthogonal **category axis** — *what kind* of problem it is — so you can
+follow one class of problem across the **whole network**, regardless of station:
+
+| Handle | Covers |
+|---|---|
+| `code` | **software failures, network-wide** — crashes, tracebacks, RMS `-ERROR-` log lines — on any station or fork |
+| `code-<repo>` | those, **on one repo only** — `code-upstream` (the official RMS) or `code-<fork-owner>` (a fork) |
+
+The bridge classifies each alert from its problem text and, on a match, *also*
+publishes it to the category handle. `code` is aimed at **developers** who want
+software errors fleet-wide without operator noise (dropped frames, memory,
+network, clock — those carry no category, so only the station's operator gets
+them). A crash's own traceback / `-ERROR-` line is what lands in `code`; the
+downstream symptom (e.g. *capture process not running*) stays operator-only, so
+there's no double-tagging.
+
+Category alerts are additionally **scoped by the station's repo** (its
+`rms_remote`): a dev working on upstream + their own fork subscribes to
+`code-upstream` + `code-<their-fork>` and never hears about *other* devs' forks.
+Operators need none of this — your group/prefix handle already includes the code
+alerts for your own stations. Categories and repo handles are configured on the
+bridge (`categories:` / `repo_handles:` in its config), not on the monitor.
+
 ### How to receive them (Telegram or ntfy)
 
-Pick a **token** from the table above — your `group_slug`, a single `stationID`,
-or a 3+ char network prefix — then subscribe on either platform:
+Pick a **token** from either table above — your `group_slug`, a single
+`stationID`, a 3+ char network prefix, or a category handle (`code`,
+`code-upstream`, …) — then subscribe on either platform:
 
 **Telegram — works on every platform (iOS, Android, desktop). Recommended,
 especially on iPhone/iPad.** Open a chat with the bridge bot
