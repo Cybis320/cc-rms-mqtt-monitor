@@ -50,9 +50,24 @@ Distinguish the two `health` shapes by payload:
 - `rms_remote` — URL of the repo the RMS checkout pulls from (origin; host-wide;
   URL-embedded credentials stripped).
 - `rms_up_to_date` (bool) — HEAD is exactly the live remote tip (ls-remote vs HEAD).
+<<<<<<< Updated upstream
 - `rms_out_of_date_days` (float) — how long the checkout has been behind: now minus
   when the monitor **first observed this HEAD to be behind its remote tip** (i.e.
   when the branch ref first moved past it). `0.0` while up to date. This is NOT a
+=======
+- `rms_head` (string) — the checkout's current commit SHA, from a purely **local**
+  `git rev-parse HEAD` (**no fetch, no pull, not even an ls-remote** — zero network
+  on the station; host-wide). This is the field that lets the box compute *exact*
+  staleness: the box watches the branch ref itself (its own `ls-remote` polling)
+  and measures "behind" as `now − when the tip first moved off this exact
+  `rms_head``. That is immune to (a) commit-date/merge quirks, (b) how often or
+  how promptly the *station* re-checks — a station can even be wrong about
+  `rms_up_to_date` (stale) and the box still gets it right, because it only needs
+  the local HEAD sha, not the station's opinion of whether it's current. Absent on
+  detached HEAD / no checkout.
+- `rms_update_age_days` (float) — days since this checkout last actually pulled new
+  code (reflog age). This is the "is the updater keeping up?" signal — NOT a
+>>>>>>> Stashed changes
   commit-date lag (a commit's date can predate when it lands on the branch, so a
   commit-date "days behind" jumps the instant an old-dated PR merges); the stamp is
   the wall-clock moment the ref advanced, observed by polling and persisted across
