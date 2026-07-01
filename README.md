@@ -65,7 +65,7 @@ the human-readable text.
 
 | Key | Severity | Fires when | Threshold |
 |---|---|---|---|
-| `camera_unreachable` | error | the camera hasn't answered a ping for a sustained window **while output is stalled** — the root cause of a whole symptom cascade. Collapses the record to this one line (outranking even `capture_down`) and drops the station to cheap-ping-only **standby** until it answers. Stall-gated, so a camera that merely filters ICMP is never mistaken for down | `camera_unreachable_grace_s` (300s) |
+| `camera_unreachable` | error | the camera hasn't answered a ping for a sustained window **while output is stalled** (stale FF/frames, or none ever produced — so a fresh/undeployed camera that never came up counts too) — the root cause of a whole symptom cascade. Collapses the record to this one line (outranking even `capture_down`) and drops the station to cheap-ping-only **standby** until it answers, so during a deploy you see the exact moment it becomes reachable. Stall-gated, so a camera that merely filters ICMP is never mistaken for down | `camera_unreachable_grace_s` (300s) |
 | `capture_down` | error | the station's `RMS.StartCapture` process isn't running | — |
 | `capture_stalled` | error | expected output is stale — no FF (night) or no frame (continuous day). Suppressed for a settling grace after the capture process (re)starts, so a staggered GRMSUpdater restart doesn't false-alarm | `output_fresh_error_s` (300s); grace `capture_restart_grace_s` (300s) + the station's `capture_wait_seconds` |
 | `detection_stalled` | error | capturing FF but no `FTPdetectinfo`/`CALSTARS` produced | `detection_grace_s` (1800s) |

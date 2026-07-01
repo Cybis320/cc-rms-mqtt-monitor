@@ -103,10 +103,18 @@ def _resolve_expected(metrics, thresholds):
 
 def output_stalled(metrics, thresholds):
     """True when RMS should be producing output (FF at night / frames by day) but
-    hasn't within output_fresh_error_s -- the `capture_stalled` predicate factored
-    out so the monitor loop can stall-gate the camera-reachability ping on it
-    (honouring the same post-restart settling grace). An idle pipeline (nothing
-    expected) is never 'stalled'."""
+    isn't -- the `capture_stalled` predicate factored out so the monitor loop can
+    stall-gate the camera-reachability ping on it (honouring the same post-restart
+    settling grace). An idle pipeline (nothing expected) is never 'stalled'.
+
+    Two ways to be stalled:
+      * output exists but has gone stale (age >= output_fresh_error_s), or
+      * NO output has ever been produced while it's expected and RMS has been in
+        the producing session long enough to have made some. This second case is
+        what catches a fresh / never-deployed camera that never came up (it has no
+        prior FF to go stale), so the ping still fires and an unreachable one
+        collapses to a clean 'camera not pingable' instead of watchdog noise.
+    """
     capture_age = metrics.get("capture_age_s")
     restart_grace = (thresholds.capture_restart_grace_s
                      + (metrics.get("capture_wait_seconds") or 0))
@@ -119,7 +127,16 @@ def output_stalled(metrics, thresholds):
         age = metrics.get("newest_frame_age_s")
     else:
         return False
-    return age is not None and age >= thresholds.output_fresh_error_s
+    if age is not None:
+        return age >= thresholds.output_fresh_error_s
+    # No output at all: a stall only once it's been expected-and-producing long
+    # enough to have made something -- so a just-started session (or a cam still
+    # in its settling grace) isn't falsely flagged. Session age preferred; else
+    # process age. No time evidence at all => don't claim a stall.
+    elapsed = metrics.get("capture_session_age_s")
+    if elapsed is None:
+        elapsed = capture_age
+    return elapsed is not None and elapsed >= thresholds.output_fresh_error_s
 
 
 def classify_drops(metrics, host_metrics, thresholds):

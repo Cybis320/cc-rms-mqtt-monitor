@@ -32,6 +32,18 @@ def test_output_stalled_predicate():
     assert not health.output_stalled({"expected_output": "idle"}, T)           # idle
 
 
+def test_never_produced_output_is_stalled():
+    # Fresh / undeployed camera: expected FF, none EVER produced, RMS up a while.
+    m = dict(expected_output="ff", newest_fits_age_s=None,
+             capture_session_age_s=1200, capture_age_s=1200, capture_wait_seconds=0)
+    assert health.output_stalled(m, T)
+    # ...but not before it's been producing long enough to have made one.
+    assert not health.output_stalled(dict(m, capture_session_age_s=30, capture_age_s=30), T)
+    # No time evidence at all -> don't claim a stall on a never-produced station.
+    assert not health.output_stalled(dict(expected_output="ff", newest_fits_age_s=None,
+                                          capture_session_age_s=None, capture_age_s=None), T)
+
+
 def test_standby_collapses_and_outranks_capture_down():
     # Camera in standby AND StartCapture also gone: report ONLY camera-unreachable.
     m = dict(capture_alive=False, camera_standby=True, camera_host="10.0.0.9",
