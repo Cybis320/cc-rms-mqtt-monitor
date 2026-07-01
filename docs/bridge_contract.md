@@ -100,6 +100,32 @@ For **each host alert** (and the offline Last-Will), fan out to:
 Station IDs are alphanumeric and `group_slug` is pre-slugified, so every handle
 is a valid ntfy topic / Telegram token (no spaces).
 
+### 3b. Category axis (a second, orthogonal set of handles)
+
+The handles above are the **station axis** (*whose* station). A bridge MAY also
+fan out on a **category axis** (*what kind* of problem), letting a subscriber
+follow one problem class network-wide, across all stations:
+
+- The bridge classifies each alert from its `problems[]` text against a
+  configurable map `categories: {name: [regex, …]}` (case-insensitive). For every
+  category whose pattern matches, it **also** publishes the alert to the handle
+  `<category>` — e.g. `code` (crashes, tracebacks, RMS `-ERROR-` log lines).
+  Symptoms that merely *result* from a fault (e.g. *capture process not running*,
+  *timelapse not generated*) carry no category — the underlying error surfaces its
+  own alert, which is what lands in `code`, so there's no double-tagging.
+- If `category_repo_scope` is on, each category alert is **also** published to
+  `<category>-<repo>`, where `<repo>` is a short handle for the station's
+  `rms_remote` (the official RMS → `upstream`; a fork → its owner, or a
+  `repo_handles` alias). This lets a developer follow, say, `code-upstream` and
+  `code-<their-fork>` while ignoring other forks. Requires the monitor to publish
+  **`rms_remote`** (its `origin` URL) in the health record; absent it, only the
+  unscoped `<category>` handle is used.
+
+The category axis is **additive** — it never replaces the station handles, so an
+operator subscribed to their `group_slug`/prefix still receives every alert
+(code ones included) for their own stations. The matching recovery/all-clear is
+fanned out to the same category handles as the alert.
+
 ## 4. Don't alert on EXPECTED disruption (use the monitor's `maintenance` flag)
 
 The monitor reports the true *current* state every 60 s, and it also tells you
