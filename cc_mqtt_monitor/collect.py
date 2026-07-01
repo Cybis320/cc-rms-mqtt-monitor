@@ -942,6 +942,37 @@ def _head_signal(rms_dir):
 _UPTODATE_CACHE = {}     # rms_dir -> (monotonic_ts, up_to_date_or_None, head_signal)
 _UPTODATE_TTL = 1800     # 30 min
 
+# Persisted "behind since" clock: the wall-clock time we FIRST observed the
+# current HEAD to be behind its remote tip. Kept in the user's home so it
+# survives monitor restarts (the nightly auto-update) and reboots -- otherwise a
+# multi-day "out of date" would reset to ~0 every restart.
+_STATE_FILE = os.path.expanduser("~/.cache/cc-rms-monitor/repo_state.json")
+_REPO_STATE = None       # {realpath(rms_dir): {"head": sha, "since": epoch|None}}
+
+
+def _repo_state():
+    global _REPO_STATE
+    if _REPO_STATE is None:
+        try:
+            with open(_STATE_FILE) as fh:
+                _REPO_STATE = json.load(fh)
+            if not isinstance(_REPO_STATE, dict):
+                _REPO_STATE = {}
+        except (IOError, OSError, ValueError):
+            _REPO_STATE = {}
+    return _REPO_STATE
+
+
+def _save_repo_state():
+    try:
+        os.makedirs(os.path.dirname(_STATE_FILE), exist_ok=True)
+        tmp = _STATE_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(_REPO_STATE, fh)
+        os.replace(tmp, _STATE_FILE)
+    except (IOError, OSError):
+        pass
+
 
 def _check_up_to_date(rms_dir):
     """True/False if HEAD equals the live remote tip -- `git ls-remote` vs HEAD,
@@ -966,34 +997,63 @@ def rms_repo_status(rms_dir):
 
       rms_up_to_date      -- HEAD equals the live remote tip (ls-remote vs HEAD,
                              like RMS_Update.sh's gate; no fetch, zero-touch).
-      rms_update_age_days -- days since this checkout last actually pulled new
-                             code (reflog mtime).
+      rms_out_of_date_days-- days the checkout has been behind: now minus when we
+                             FIRST observed this HEAD to be behind its remote tip
+                             (i.e. when the branch ref first moved past it). 0.0
+                             while up to date.
 
-    `rms_update_age_days`, NOT a commit-date lag, is the "is the updater keeping
-    up?" signal. A commit's date can long predate when it lands on the branch (a
-    PR that sat for weeks merges today), so a commit-date "days behind" reports a
-    huge lag the instant such a commit merges -- nonsense. Update age measures
-    when THIS station last pulled, which is immune to that. up_to_date is cached
-    per TTL but re-checked the instant HEAD moves; update age is fresh each call.
+    This is deliberately NOT a commit-date lag (a commit's date can long predate
+    when it lands on the branch -- a PR that sat for weeks merges today -- so a
+    commit-date "days behind" jumps the instant such a commit merges). Instead we
+    stamp the wall-clock moment the ref first advanced past this HEAD and count
+    from there. Git exposes no ref-move timestamp, so we observe it by polling
+    (ls-remote, cached per TTL / re-checked the instant HEAD moves) and persist
+    the stamp across restarts. Resolution ~= the poll interval.
     """
     rms_dir = os.path.expanduser(rms_dir or "")
     if not rms_dir or not os.path.isdir(os.path.join(rms_dir, ".git")):
         return {}
+    head = _git(rms_dir, "rev-parse", "HEAD")
+    if not head:
+        return {}
 
-    status = {}
-    sig = _head_signal(rms_dir)        # reflog mtime: last time HEAD moved
-    if sig is not None:
-        status["rms_update_age_days"] = round(max(0.0, (time.time() - sig) / 86400.0), 1)
-
-    now = time.monotonic()
+    sig = _head_signal(rms_dir)        # reflog mtime: HEAD-moved trigger for the cache
+    mono = time.monotonic()
     cached = _UPTODATE_CACHE.get(rms_dir)
-    if cached is not None and now - cached[0] < _UPTODATE_TTL and sig == cached[2]:
+    if cached is not None and mono - cached[0] < _UPTODATE_TTL and sig == cached[2]:
         up = cached[1]
     else:
         up = _check_up_to_date(rms_dir)
-        _UPTODATE_CACHE[rms_dir] = (now, up, sig)
+        _UPTODATE_CACHE[rms_dir] = (mono, up, sig)
+
+    status = {}
     if up is not None:
         status["rms_up_to_date"] = up
+
+    # Persisted behind-since clock, keyed by checkout, updated on transitions.
+    state = _repo_state()
+    key = os.path.realpath(rms_dir)
+    entry = dict(state.get(key) or {})
+    now = time.time()
+    changed = False
+    if entry.get("head") != head:              # HEAD moved (pulled/reset) -> new clock
+        entry = {"head": head, "since": None}
+        changed = True
+    if up is True and entry.get("since") is not None:
+        entry["since"] = None                  # caught up -> stop the clock
+        changed = True
+    elif up is False and entry.get("since") is None:
+        entry["since"] = now                   # first seen behind -> start the clock
+        changed = True
+    # up is None (offline/undeterminable): leave the clock untouched.
+    if changed:
+        state[key] = entry
+        _save_repo_state()
+
+    if up is not None:
+        since = entry.get("since")
+        status["rms_out_of_date_days"] = (0.0 if since is None
+                                          else round(max(0.0, (now - since) / 86400.0), 1))
     return status
 
 

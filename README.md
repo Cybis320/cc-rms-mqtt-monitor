@@ -219,7 +219,7 @@ Example `health` payload:
   "rms_branch": "master",
   "rms_remote": "https://github.com/CroatianMeteorNetwork/RMS.git",
   "rms_up_to_date": true,
-  "rms_update_age_days": 0.3,
+  "rms_out_of_date_days": 0.0,
   "host": "us005-host",
   "timestamp": "2026-06-15T17:40:00Z"
 }

@@ -50,12 +50,15 @@ Distinguish the two `health` shapes by payload:
 - `rms_remote` — URL of the repo the RMS checkout pulls from (origin; host-wide;
   URL-embedded credentials stripped).
 - `rms_up_to_date` (bool) — HEAD is exactly the live remote tip (ls-remote vs HEAD).
-- `rms_update_age_days` (float) — days since this checkout last actually pulled new
-  code (reflog age). This is the "is the updater keeping up?" signal — NOT a
+- `rms_out_of_date_days` (float) — how long the checkout has been behind: now minus
+  when the monitor **first observed this HEAD to be behind its remote tip** (i.e.
+  when the branch ref first moved past it). `0.0` while up to date. This is NOT a
   commit-date lag (a commit's date can predate when it lands on the branch, so a
-  commit-date "days behind" misreports). Host-wide (one checkout per box), mirrored
-  onto each station record. **See §9 for the alert tiers.** Absent when
-  undeterminable (offline / detached / no upstream / no reflog).
+  commit-date "days behind" jumps the instant an old-dated PR merges); the stamp is
+  the wall-clock moment the ref advanced, observed by polling and persisted across
+  restarts (resolution ~= the poll interval). Host-wide (one checkout per box),
+  mirrored onto each station record. **See §9 for the alert tiers.** Absent when
+  up_to_date is undeterminable (offline / detached / no upstream).
 - `host`, `timestamp` (ISO-8601 UTC)
 
 **Host** (`stations/<host>/health`):
@@ -212,22 +215,22 @@ This is a separate axis from the operational `status` (a fully-working box can
 still be running stale code). The **bridge** decides severity, on the **host**
 record (one RMS checkout per box — don't multiply by each station).
 
-**Gate on `rms_up_to_date == false`, then tier on `rms_update_age_days`** (days
-since the station last actually pulled new code — the "is the updater keeping
-up?" number, immune to commit-date quirks):
+**Gate on `rms_up_to_date == false`, then tier on `rms_out_of_date_days`** (how
+long the checkout has been behind — measured from when the remote ref first moved
+past this HEAD, immune to commit-date quirks):
 
 | Condition | Action |
 |---|---|
 | `rms_up_to_date == true` | **no alert** — on the tip (regardless of age; a quiet branch just hasn't moved) |
-| not up-to-date, `rms_update_age_days < 1` | **no alert** — updater ran recently; normal lag on an active branch |
-| not up-to-date, `1 ≤ age ≤ 3` | **degraded** — updater hasn't caught up in 1–3 days |
-| not up-to-date, `age > 3` | **error** — updater appears stuck |
-| either field absent | no alert (couldn't determine — offline/detached) |
+| not up-to-date, `rms_out_of_date_days < 1` | **no alert** — just fell behind; the nightly updater gets a chance to catch up |
+| not up-to-date, `1 ≤ days ≤ 3` | **degraded** — behind for 1–3 days; updater hasn't caught up |
+| not up-to-date, `days > 3` | **error** — updater appears stuck |
+| `rms_up_to_date` absent | no alert (couldn't determine — offline/detached) |
 
 > Do **not** tier on a commit-date "days behind": a commit's date can long
 > predate when it merges, so that misreports a huge lag the instant such a commit
-> lands. `rms_update_age_days` reflects when THIS station last pulled, which is
-> what actually tells you the updater stopped working.
+> lands. `rms_out_of_date_days` counts from when the ref actually moved past this
+> station's HEAD, which is what tells you how long the updater has been stuck.
 
 Fan it out on the host axes (§3, `group_slugs` + `station_ids`). `rms_up_to_date`
 is the at-a-glance boolean for the dashboard. Suppress while `maintenance` is
