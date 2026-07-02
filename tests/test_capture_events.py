@@ -67,6 +67,24 @@ def test_no_stars_line_is_none():
     assert res["stars_recent"] is None
 
 
+def test_capture_backend_found_far_from_tail():
+    # RMS logs "GStreamer pipeline created!" ONCE at start; the full-log stream
+    # must still find it after thousands of later lines (a tail scan would miss it).
+    lines = ["2026/07/02 17:13:21-INFO-BufferedCapture-line:1421 - GStreamer pipeline created!"]
+    lines += ["...WATCHDOG: Status check - capture_alive=True"] * 8000
+    res = _run(lines)
+    assert res["capture_backend"] == "gst"
+
+
+def test_capture_backend_cv2_fallback_wins():
+    # gst attempt then OpenCV init at startup => cv2 is the actual backend.
+    res = _run([
+        "...GStreamer pipeline created!",
+        "...Using OpenCV.",
+    ])
+    assert res["capture_backend"] == "cv2"
+
+
 def test_overflow_frame_reports_over_cap_not_zero():
     # "Too many candidate stars! 920/800" then "Detected stars: 0" => the frame was
     # too rich to count, so stars_recent is ">800", not a misleading 0.

@@ -704,7 +704,10 @@ def collect_logs(station, max_lines, warning_ignore=None):
         "decoder_errors": 0,
         "rms_mode": None,   # RMS's actual day/night mode (ground truth, see below)
         "media_backend": station.media_backend,   # configured (gst/cv2/v4l2)
-        "capture_backend": None,                   # actual, from the log (gst/cv2)
+        # capture_backend (actual gst/cv2) is detected in collect_capture_events:
+        # RMS logs "GStreamer pipeline created!" ONCE at capture start, so a tail
+        # scan loses it once the log grows past the window -- the full-log stream
+        # there always finds the startup marker (near the top of each restart log).
     }
     log_path = _newest_log(station)
     if not log_path:
@@ -756,13 +759,6 @@ def collect_logs(station, max_lines, warning_ignore=None):
         mode = _DAYTIME_MODE_RE.search(line)
         if mode:
             result["rms_mode"] = "day" if mode.group(1) == "True" else "night"
-
-        # Actual capture backend: last init marker in the tail wins (a gst->cv2
-        # fallback logs the gst attempt then the OpenCV init, so cv2 ends last).
-        if _BACKEND_GST_RE.search(line):
-            result["capture_backend"] = "gst"
-        elif _BACKEND_CV2_RE.search(line):
-            result["capture_backend"] = "cv2"
 
     # Peak buffer fill in the recent window -- the back-pressure signal, since the
     # fill at the drop line has usually recovered to baseline. Prefer the
@@ -931,20 +927,34 @@ def collect_capture_events(station):
                                    skipped that frame (it logs "Detected stars: 0",
                                    but the field was actually too rich to count, so
                                    0 would mislead). None until the first FF.
+      capture_backend           -- actual capture backend (gst/cv2) from the init
+                                   marker. RMS logs it ONCE at capture start, so it
+                                   must be read from the whole log, not a short tail
+                                   (else it's lost hours into a session -- e.g. a
+                                   long day run -- and backend_fallback can't fire).
     All null if the log can't be read. O(1) memory (line-streamed).
     """
     result = {"disconnects_session": None, "watchdog_restarts_session": None,
-              "meteors_session": None, "stars_recent": None}
+              "meteors_session": None, "stars_recent": None,
+              "capture_backend": None}
     log_path = _newest_log(station)
     if not log_path:
         return result
-    disc, wd, met, stars = 0, 0, 0, None
+    disc, wd, met, stars, backend = 0, 0, 0, None, None
     overflow_cap = None   # set by an overflow line; consumed by the next star line
     try:
         with open(log_path, errors="replace") as fh:
             for line in fh:
                 if _TRANSITION_RE.search(line):
                     disc, wd, met = 0, 0, 0      # new session -> reset (as RMS does)
+                    continue
+                # Actual backend: last init marker wins (a gst->cv2 fallback logs
+                # the gst attempt then the OpenCV init, so cv2 ends last).
+                if _BACKEND_GST_RE.search(line):
+                    backend = "gst"
+                    continue
+                if _BACKEND_CV2_RE.search(line):
+                    backend = "cv2"
                     continue
                 if _DISCONNECT_RE.search(line):
                     disc += 1
@@ -974,6 +984,7 @@ def collect_capture_events(station):
     result["watchdog_restarts_session"] = wd
     result["meteors_session"] = met
     result["stars_recent"] = stars
+    result["capture_backend"] = backend
     return result
 
 
