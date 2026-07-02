@@ -375,6 +375,10 @@ def collect_timelapse(station, now=None):
     session (before ffmpeg finalizes), and the matching ..._frames_timelapse.mp4
     on success. An ffmpeg failure leaves the json but no (or a stub) mp4, and is
     only logged as a WARNING -- so this outcome check is the way to catch it.
+
+    Note: with frame_cleanup=delete (RMS's DEFAULT) the mp4 is archived to
+    ..._frames_timelapse.tar and the loose mp4 removed, so a produced timelapse is
+    counted from EITHER the mp4 or the tar -- else the checks false-fire.
     """
     result = {
         "timelapse_mp4_present": None,    # newest session's mp4 present (ran-but-failed)
@@ -394,17 +398,24 @@ def collect_timelapse(station, now=None):
         newest = max(jsons)   # latest session by name (sortable start/end timestamps)
         result["timelapse_session_age_s"] = round(now - _safe_mtime(newest), 1)
         prefix = os.path.basename(newest)[:-len(suffix)]
+        # Success = a loose mp4 OR the archived tar: with frame_cleanup=delete
+        # (RMS default) the mp4 is tarred to *_frames_timelapse.tar and removed.
         mp4 = os.path.join(fp, prefix + "_frames_timelapse.mp4")
+        tars = glob.glob(os.path.join(fp, prefix + "_frames_timelapse.tar*"))
         try:
-            result["timelapse_mp4_present"] = (
+            result["timelapse_mp4_present"] = bool(tars) or (
                 os.path.isfile(mp4) and os.path.getsize(mp4) > _MIN_TIMELAPSE_BYTES)
         except OSError:
-            result["timelapse_mp4_present"] = False
+            result["timelapse_mp4_present"] = bool(tars)
 
-    # Newest timelapse mp4 of any session (for the "none being generated" check).
-    mp4s = glob.glob(os.path.join(fp, "*_frames_timelapse.mp4"))
-    if mp4s:
-        result["newest_timelapse_age_s"] = round(now - _safe_mtime(max(mp4s)), 1)
+    # Newest frame timelapse of any session (for the "none being generated" check).
+    # Match the archived forms too (*.tar/.tar.gz/.tar.bz2, per RMS's own artifact
+    # list) -- with frame_cleanup=delete the loose mp4 is removed after archiving,
+    # so an mp4-only glob would see "no timelapse ever" and false-fire overdue.
+    tls = (glob.glob(os.path.join(fp, "*_frames_timelapse.mp4"))
+           + glob.glob(os.path.join(fp, "*_frames_timelapse.tar*")))
+    if tls:
+        result["newest_timelapse_age_s"] = round(now - _safe_mtime(max(tls)), 1)
 
     # Oldest frame data on disk (FramesFiles/<year>/<date>/...), so a station
     # that has accumulated frames for ages but produced no mp4 is still caught.
