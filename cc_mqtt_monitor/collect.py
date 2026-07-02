@@ -550,6 +550,10 @@ _WD_RESTART_RE = re.compile(r"WATCHDOG: Restarting BufferedCapture.*restart #(\d
 # end-of-night "TOTAL: N" line. (Note the colon: this does NOT match the summary
 # line "TOTAL: N detected meteors.", which has no "detected meteors:<num>".)
 _METEOR_RE = re.compile(r"detected meteors:\s*(\d+)")
+# Per-FF star count ("...-DetectStarsAndMeteors-... - Detected stars: N"). An
+# instantaneous sky-transparency reading (NOT accumulated like meteors): we keep
+# the most recent value as a live limiting-magnitude / cloud proxy. 0 by day.
+_STARS_RE = re.compile(r"Detected stars:\s*(\d+)")
 
 # Benign, high-volume RMS warnings ignored by default: computational artifacts
 # or self-recovering races, not operational problems. Operators add more via
@@ -901,14 +905,17 @@ def collect_capture_events(station):
       meteors_session           -- meteors detected this session (sum of the
                                    real-time per-FF "detected meteors: N"); a live
                                    running total for flux on the dashboard
+      stars_recent              -- the most recent per-FF "Detected stars: N"
+                                   (NOT summed): a live sky-transparency reading,
+                                   0 by day. None until the first FF is processed.
     All null if the log can't be read. O(1) memory (line-streamed).
     """
     result = {"disconnects_session": None, "watchdog_restarts_session": None,
-              "meteors_session": None}
+              "meteors_session": None, "stars_recent": None}
     log_path = _newest_log(station)
     if not log_path:
         return result
-    disc, wd, met = 0, 0, 0
+    disc, wd, met, stars = 0, 0, 0, None
     try:
         with open(log_path, errors="replace") as fh:
             for line in fh:
@@ -925,11 +932,16 @@ def collect_capture_events(station):
                 m = _METEOR_RE.search(line)
                 if m:
                     met += int(m.group(1))
+                    continue
+                m = _STARS_RE.search(line)
+                if m:
+                    stars = int(m.group(1))   # last one wins => most recent
     except (IOError, OSError):
         return result
     result["disconnects_session"] = disc
     result["watchdog_restarts_session"] = wd
     result["meteors_session"] = met
+    result["stars_recent"] = stars
     return result
 
 

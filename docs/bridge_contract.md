@@ -43,6 +43,10 @@ Distinguish the two `health` shapes by payload:
   running total, resets at each day<->night transition; 0 by day). Matches RMS's
   end-of-night `TOTAL`. For a live meteor rate / flux indicator on the dashboard
   (true flux also needs collecting area + limiting magnitude, which aren't live).
+- `stars_recent` (int|null) — the most recent per-FF "Detected stars" count. NOT
+  accumulated (unlike `meteors_session`): it's an instantaneous sky-transparency /
+  limiting-magnitude reading — high on a clear night, low/0 when clouded or by day.
+  `null` until the first FF is processed. Informational, for the dashboard.
 - `rms_mode` — RMS's **actual** day/night capture mode: `day` | `night` | `null`
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.
