@@ -379,9 +379,8 @@ def evaluate(metrics, thresholds, disabled=()):
     if (tl_age is not None and tl_age >= thresholds.timelapse_grace_s
             and metrics.get("timelapse_mp4_present") is False):
         flag(DEGRADED, "timelapse_missing",
-             "Frames timelapse (FramesFiles/*_frames_timelapse.mp4, from saved day "
-             "frames -- not the night CapturedFiles timelapse) not generated for "
-             "the last frame session (%.0fs ago)" % tl_age)
+             "Frames timelapse (FramesFiles/*_frames_timelapse.mp4) not generated "
+             "for the last frame session (%.0fs ago)" % tl_age)
 
     # (b) not generating at all: frames are actively being saved, but no mp4 has
     # appeared in ages (or none ever, despite frames piling up). Latitude-
@@ -397,9 +396,8 @@ def evaluate(metrics, thresholds, disabled=()):
             overdue = frames_data  # frames accumulating but no mp4 ever produced
         if overdue is not None:
             flag(DEGRADED, "timelapse_overdue",
-                 "No frames timelapse (FramesFiles/*_frames_timelapse.mp4, from saved "
-                 "day frames -- not the night CapturedFiles timelapse) generated in "
-                 "%.1fh while saving frames" % (overdue / 3600.0))
+                 "No frames timelapse (FramesFiles/*_frames_timelapse.mp4) generated "
+                 "in %.1fh while saving frames" % (overdue / 3600.0))
 
     # --- Fatal log errors / tracebacks -----------------------------------
     if metrics.get("fatal_error_count"):
