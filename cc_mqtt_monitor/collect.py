@@ -527,12 +527,12 @@ _WATCHDOG_RE = re.compile(r"WATCHDOG:.*(died|stale|Restarting)", re.IGNORECASE)
 # RMS log level field, e.g. "2026/06/20 03:08:33-WARNING-BufferedCapture-line:..".
 _WARNING_RE = re.compile(r"-WARNING-")
 # ExtractStars overflow: "Too many candidate stars to process! 920/800". When the
-# candidate list exceeds the cap, RMS SKIPS star extraction for that frame and
-# logs "Detected stars: 0" -- so a rich (good!) field yields no extracted stars /
-# no CALSTARS for that FF, silently losing a calibration frame. Captures
-# candidates/limit. It's filtered from the generic warning check (see
-# _DEFAULT_WARNING_IGNORE) and surfaced by the dedicated star_extraction_overflow.
-_STAR_OVERFLOW_RE = re.compile(r"Too many candidate stars to process!\s*(\d+)\s*/\s*(\d+)")
+# candidate list exceeds the cap (2nd number), RMS SKIPS extraction for that frame
+# and logs "Detected stars: 0" -- so a rich (good!) field looks like zero stars.
+# We use this only to DISAMBIGUATE that 0: stars_recent reports ">800" (the cap)
+# for such a frame instead of a misleading 0 (see collect_capture_events). The
+# warning itself stays benign/ignored (_DEFAULT_WARNING_IGNORE) -- no alert.
+_STAR_OVERFLOW_RE = re.compile(r"Too many candidate stars to process!\s*\d+\s*/\s*(\d+)")
 # RMS's actual day/night mode: the in-process `daytime_mode` flag, logged every
 # ~60s by the capture watchdog ("daytime_mode_prev=True/False"). This is the only
 # mode signal independent of save_frames/raw saving, so it's the ground truth.
@@ -566,8 +566,8 @@ _STARS_RE = re.compile(r"Detected stars:\s*(\d+)")
 # or self-recovering races, not operational problems. Operators add more via
 # config `log_warning_ignore` (these defaults always apply).
 _DEFAULT_WARNING_IGNORE = [
-    r"Too many candidate stars",  # noisy per-frame; surfaced instead by the
-                                  # dedicated star_extraction_overflow check
+    r"Too many candidate stars",  # benign/noisy per-frame; not alerted -- only
+                                  # used to encode stars_recent as ">cap"
     r"Could not record media_backend in observation summary",  # summary-lock race; capture continues
     r"(?:Runtime|Optimize|User|Deprecation|Future|Pending)Warning:",  # numpy/scipy/py warnings
     r"alignPlatepar: Fit did not converge",                    # self-recovers to original platepar
@@ -694,9 +694,6 @@ def collect_logs(station, max_lines, warning_ignore=None):
         "rms_mode": None,   # RMS's actual day/night mode (ground truth, see below)
         "media_backend": station.media_backend,   # configured (gst/cv2/v4l2)
         "capture_backend": None,                   # actual, from the log (gst/cv2)
-        "star_overflow": False,        # ExtractStars hit its candidate cap (frame skipped)
-        "star_candidates": None,       # candidate stars found (N in "N/M")
-        "star_candidate_limit": None,  # the cap (M in "N/M")
     }
     log_path = _newest_log(station)
     if not log_path:
@@ -729,12 +726,6 @@ def collect_logs(station, max_lines, warning_ignore=None):
 
         if _WATCHDOG_RE.search(line):
             result["last_watchdog_event"] = redact(line.strip())[:300]
-
-        so = _STAR_OVERFLOW_RE.search(line)
-        if so:
-            result["star_overflow"] = True
-            result["star_candidates"] = int(so.group(1))
-            result["star_candidate_limit"] = int(so.group(2))
 
         buf = _BUFFER_RE.search(line)
         if buf:
@@ -922,9 +913,13 @@ def collect_capture_events(station):
       meteors_session           -- meteors detected this session (sum of the
                                    real-time per-FF "detected meteors: N"); a live
                                    running total for flux on the dashboard
-      stars_recent              -- the most recent per-FF "Detected stars: N"
-                                   (NOT summed): a live sky-transparency reading,
-                                   0 by day. None until the first FF is processed.
+      stars_recent              -- the most recent per-FF star count (NOT summed):
+                                   a live sky-transparency reading. An int normally
+                                   (0 by day / clouded), or the STRING ">N" when
+                                   ExtractStars overflowed its N-candidate cap and
+                                   skipped that frame (it logs "Detected stars: 0",
+                                   but the field was actually too rich to count, so
+                                   0 would mislead). None until the first FF.
     All null if the log can't be read. O(1) memory (line-streamed).
     """
     result = {"disconnects_session": None, "watchdog_restarts_session": None,
@@ -933,6 +928,7 @@ def collect_capture_events(station):
     if not log_path:
         return result
     disc, wd, met, stars = 0, 0, 0, None
+    overflow_cap = None   # set by an overflow line; consumed by the next star line
     try:
         with open(log_path, errors="replace") as fh:
             for line in fh:
@@ -950,9 +946,17 @@ def collect_capture_events(station):
                 if m:
                     met += int(m.group(1))
                     continue
+                so = _STAR_OVERFLOW_RE.search(line)
+                if so:
+                    overflow_cap = int(so.group(1))   # "N/M" -> the cap M; frame skipped
+                    continue
                 m = _STARS_RE.search(line)
                 if m:
-                    stars = int(m.group(1))   # last one wins => most recent
+                    n = int(m.group(1))
+                    # An overflow frame logs "Detected stars: 0"; report ">cap"
+                    # instead so a too-rich field isn't shown as zero stars.
+                    stars = ">%d" % overflow_cap if (overflow_cap and n == 0) else n
+                    overflow_cap = None   # consumed
     except (IOError, OSError):
         return result
     result["disconnects_session"] = disc

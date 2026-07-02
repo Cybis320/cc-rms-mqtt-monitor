@@ -67,29 +67,30 @@ def test_no_stars_line_is_none():
     assert res["stars_recent"] is None
 
 
-def test_star_overflow_detected_and_flagged():
-    from cc_mqtt_monitor import health
-    from cc_mqtt_monitor.config import Thresholds
-    line = ("2026/07/02 07:15:07-WARNING-ExtractStars-line:134 - "
-            "Too many candidate stars to process! 920/800")
-    # It's collected by collect_logs (tail scan), not collect_capture_events.
-    path = os.path.join(tempfile.mkdtemp(), "log_US005A_1.log")
-    with open(path, "w") as fh:
-        fh.write(line + "\n")
+def test_overflow_frame_reports_over_cap_not_zero():
+    # "Too many candidate stars! 920/800" then "Detected stars: 0" => the frame was
+    # too rich to count, so stars_recent is ">800", not a misleading 0.
+    res = _run([
+        "...-WARNING-ExtractStars-line:134 - Too many candidate stars to process! 920/800",
+        "...-DetectStarsAndMeteors-line:231 - Detected stars: 0",
+    ])
+    assert res["stars_recent"] == ">800"
 
-    class St:
-        station_id = "US005A"
-        log_path = os.path.dirname(path)
-        media_backend = "gst"
-    m = collect.collect_logs(St(), 4000)
-    assert m["star_overflow"] is True
-    assert m["star_candidates"] == 920 and m["star_candidate_limit"] == 800
-    # ...and it must NOT also trip the generic log_warning (still on the ignore list)
-    assert m["warning_count"] == 0
 
-    status, problems = health.evaluate({"capture_alive": True, **m}, Thresholds())
-    assert status == "degraded"
-    assert any("Star extraction overflowing" in p for p in problems)
+def test_genuine_zero_stays_zero():
+    # A plain "Detected stars: 0" with no preceding overflow is a real 0 (washout).
+    res = _run(["...Detected stars: 0"])
+    assert res["stars_recent"] == 0
+
+
+def test_overflow_does_not_leak_to_next_frame():
+    # The ">cap" applies only to the overflow frame; a later normal frame is an int.
+    res = _run([
+        "...Too many candidate stars to process! 920/800",
+        "...Detected stars: 0",
+        "...Detected stars: 137",
+    ])
+    assert res["stars_recent"] == 137
 
 
 if __name__ == "__main__":
