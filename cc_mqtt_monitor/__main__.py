@@ -167,7 +167,7 @@ def main(argv=None):
         finally:
             publisher.disconnect()
     else:
-        monitor.run_loop(config, publisher)
+        monitor.run_loop(config, publisher, args.config)
     return 0
 
 

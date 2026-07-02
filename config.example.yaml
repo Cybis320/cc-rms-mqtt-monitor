@@ -1,6 +1,12 @@
 # CC RMS MQTT monitor configuration.
 # Every value shown is the default; delete anything you do not need to change.
 # Copy to config.yaml and pass with: cc-rms-monitor --config config.yaml
+#
+# Hot-reload: while the service runs, edits to this file are picked up on the next
+# cycle (no restart) for everything EXCEPT the connection/identity fields --
+# broker.*, host_name, topic_prefix -- which change the MQTT connection or the
+# retained topic and still require `systemctl restart cc-rms-monitor` (the log
+# notes when a reloaded change needs a restart).
 
 broker:
   host: mqtt.contrailcast.com

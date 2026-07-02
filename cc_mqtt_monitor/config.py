@@ -243,3 +243,31 @@ def load_config(path=None):
 
     cfg.__post_init__()
     return cfg
+
+
+# Fields bound into the live MQTT connection / retained-topic identity. Changing
+# them can't take effect without reconnecting (broker) or would orphan the old
+# retained topic (host_name / topic_prefix), so the mtime hot-reload leaves them
+# pinned to the startup values -- a restart is required to apply a change.
+_RELOAD_PINNED = ("broker", "host_name", "topic_prefix")
+
+
+def reload_config(current, path):
+    """Re-read `path` for a live config swap and return (config, pinned_changed).
+
+    Every field EXCEPT the connection/identity ones (`_RELOAD_PINNED`) is taken
+    from the file, so thresholds / group / disabled_checks / etc. update on the
+    next cycle with no restart. The pinned fields are forced back to `current`'s
+    running values; `pinned_changed` lists any whose file value differs (so the
+    caller can log that a restart is needed). On any read/parse error the current
+    config is returned unchanged with `pinned_changed=None`, so a half-written
+    save never disrupts the loop."""
+    try:
+        fresh = load_config(path)
+    except Exception:
+        return current, None
+    pinned_changed = [f for f in _RELOAD_PINNED
+                      if getattr(fresh, f) != getattr(current, f)]
+    for f in _RELOAD_PINNED:
+        setattr(fresh, f, getattr(current, f))
+    return fresh, pinned_changed

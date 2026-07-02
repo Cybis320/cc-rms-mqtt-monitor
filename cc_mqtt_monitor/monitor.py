@@ -1,8 +1,11 @@
 """The collect -> evaluate -> publish loop."""
 
+import os
 import re
 import time
 import logging
+
+from .config import reload_config
 
 from .discovery import discover_stations
 from .collect import collect_station, rms_branch, rms_remote, rms_repo_status
@@ -323,13 +326,29 @@ def _connect_with_retry(config, publisher):
             backoff = min(backoff * 2, 60)
 
 
-def run_loop(config, publisher):
+def _config_mtime(path):
+    """Modification time of the config file, or None (no file / unreadable)."""
+    if not path:
+        return None
+    try:
+        return os.path.getmtime(os.path.expanduser(path))
+    except OSError:
+        return None
+
+
+def run_loop(config, publisher, config_path=None):
     """Run forever, publishing every config.interval_seconds.
 
     Connects ONLY while at least one station consents to being published
     (weblog_enable). A fully opted-out host transmits nothing; opting a station
     out at runtime wipes its retained record, and opting the whole host out wipes
-    everything and disconnects without an 'offline' marker."""
+    everything and disconnects without an 'offline' marker.
+
+    `config_path` (the --config file) is polled by mtime each cycle: an edit is
+    hot-reloaded so content fields (thresholds, group, disabled_checks, ...) take
+    effect next cycle without a restart. Connection/identity fields (broker,
+    host_name, topic_prefix) stay pinned to the startup values -- a change to
+    those is logged as needing a restart (see config.reload_config)."""
     from .oslevel import protect_from_oom
     adj = protect_from_oom()
     if adj is not None:
@@ -339,9 +358,27 @@ def run_loop(config, publisher):
 
     connected = False
     cleared = set()   # opted-out station ids whose retained record we've wiped
+    cfg_mtime = _config_mtime(config_path)
     try:
         while True:
             start = time.time()
+
+            # Hot-reload config.yaml on change (content fields only; see docstring).
+            new_mtime = _config_mtime(config_path)
+            if new_mtime is not None and new_mtime != cfg_mtime:
+                cfg_mtime = new_mtime
+                config, pinned_changed = reload_config(config, config_path)
+                if pinned_changed is None:
+                    log.warning("config.yaml changed but could not be re-read; "
+                                "keeping the previous config")
+                elif pinned_changed:
+                    log.warning("Reloaded config.yaml; %s changed -- RESTART "
+                                "required to apply those (still using startup "
+                                "values)", ", ".join(pinned_changed))
+                else:
+                    log.info("Reloaded config.yaml")
+                publisher.config = config   # pinned fields identical; keep refs in sync
+
             stations = discover_stations(config.stations_dir, config.rms_dir)
             consenting = [s for s in stations if _publishable(s)]
             opted_out = [s.station_id for s in stations if not _publishable(s)]
