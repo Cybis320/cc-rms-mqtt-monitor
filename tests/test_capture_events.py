@@ -67,6 +67,31 @@ def test_no_stars_line_is_none():
     assert res["stars_recent"] is None
 
 
+def test_star_overflow_detected_and_flagged():
+    from cc_mqtt_monitor import health
+    from cc_mqtt_monitor.config import Thresholds
+    line = ("2026/07/02 07:15:07-WARNING-ExtractStars-line:134 - "
+            "Too many candidate stars to process! 920/800")
+    # It's collected by collect_logs (tail scan), not collect_capture_events.
+    path = os.path.join(tempfile.mkdtemp(), "log_US005A_1.log")
+    with open(path, "w") as fh:
+        fh.write(line + "\n")
+
+    class St:
+        station_id = "US005A"
+        log_path = os.path.dirname(path)
+        media_backend = "gst"
+    m = collect.collect_logs(St(), 4000)
+    assert m["star_overflow"] is True
+    assert m["star_candidates"] == 920 and m["star_candidate_limit"] == 800
+    # ...and it must NOT also trip the generic log_warning (still on the ignore list)
+    assert m["warning_count"] == 0
+
+    status, problems = health.evaluate({"capture_alive": True, **m}, Thresholds())
+    assert status == "degraded"
+    assert any("Star extraction overflowing" in p for p in problems)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

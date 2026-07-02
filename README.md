@@ -74,6 +74,7 @@ the human-readable text.
 | `backend_fallback` | degraded | configured `media_backend: gst` but the log shows capture running on OpenCV (`cv2`) — GStreamer didn't start | — |
 | `timelapse_missing` | degraded | a completed frame session's ffmpeg failed — its `_frametimes.json` exists but no `_frames_timelapse.mp4` | `timelapse_grace_s` (1h) |
 | `timelapse_overdue` | degraded | saving frames but no `_frames_timelapse.mp4` produced in ages (generation not running at all; latitude-independent) | `timelapse_max_age_s` (30h) |
+| `star_extraction_overflow` | degraded | `ExtractStars` exceeded its candidate-star cap (e.g. `920/800`), so it skips those frames and logs `Detected stars: 0` — a star-rich field silently loses calibration frames. Fix: raise the camera's candidate-star limit | — |
 | `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault/Cython-build-failure in the RMS log **or** the capture's systemd-journal tail (the latter catches startup crashes that die before RMS logging starts) | — |
 | `log_warning` | degraded | actionable `WARNING`-level lines in the log tail (benign ones filtered — see below) | `log_warning_warn` (1 = any) |
 | `watchdog` | degraded | RMS `WATCHDOG: died/stale/Restarting` event | — |

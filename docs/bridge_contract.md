@@ -47,6 +47,9 @@ Distinguish the two `health` shapes by payload:
   accumulated (unlike `meteors_session`): it's an instantaneous sky-transparency /
   limiting-magnitude reading — high on a clear night, low/0 when clouded or by day.
   `null` until the first FF is processed. Informational, for the dashboard.
+  > Note: a `0` here can also be an `ExtractStars` overflow (candidate cap hit →
+  > frame skipped → `Detected stars: 0`), not a bad sky — see the
+  > `star_extraction_overflow` problem / `star_candidates`+`star_candidate_limit`.
 - `rms_mode` — RMS's **actual** day/night capture mode: `day` | `night` | `null`
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.

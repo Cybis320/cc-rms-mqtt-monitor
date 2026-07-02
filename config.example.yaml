@@ -68,7 +68,7 @@ group: null
 
 # Health checks to silence (by key), e.g. [dropped_frames, upload_backlog].
 # Empty = all on. Keys: camera_unreachable, capture_down, data_unreadable, capture_stalled, detection_stalled,
-# platepar_mismatch, config_fov_mismatch, backend_fallback,
+# platepar_mismatch, config_fov_mismatch, backend_fallback, star_extraction_overflow,
 # timelapse_missing, timelapse_overdue, log_fatal, log_warning, watchdog,
 # disk_low, upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames,
 # oom, mem_pressure, udp_rcvbuf_errors, nic_errors, disk_errors.

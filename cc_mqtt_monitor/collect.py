@@ -526,6 +526,13 @@ _FATAL_PATTERNS = [
 _WATCHDOG_RE = re.compile(r"WATCHDOG:.*(died|stale|Restarting)", re.IGNORECASE)
 # RMS log level field, e.g. "2026/06/20 03:08:33-WARNING-BufferedCapture-line:..".
 _WARNING_RE = re.compile(r"-WARNING-")
+# ExtractStars overflow: "Too many candidate stars to process! 920/800". When the
+# candidate list exceeds the cap, RMS SKIPS star extraction for that frame and
+# logs "Detected stars: 0" -- so a rich (good!) field yields no extracted stars /
+# no CALSTARS for that FF, silently losing a calibration frame. Captures
+# candidates/limit. It's filtered from the generic warning check (see
+# _DEFAULT_WARNING_IGNORE) and surfaced by the dedicated star_extraction_overflow.
+_STAR_OVERFLOW_RE = re.compile(r"Too many candidate stars to process!\s*(\d+)\s*/\s*(\d+)")
 # RMS's actual day/night mode: the in-process `daytime_mode` flag, logged every
 # ~60s by the capture watchdog ("daytime_mode_prev=True/False"). This is the only
 # mode signal independent of save_frames/raw saving, so it's the ground truth.
@@ -559,7 +566,8 @@ _STARS_RE = re.compile(r"Detected stars:\s*(\d+)")
 # or self-recovering races, not operational problems. Operators add more via
 # config `log_warning_ignore` (these defaults always apply).
 _DEFAULT_WARNING_IGNORE = [
-    r"Too many candidate stars",                               # ExtractStars caps the list
+    r"Too many candidate stars",  # noisy per-frame; surfaced instead by the
+                                  # dedicated star_extraction_overflow check
     r"Could not record media_backend in observation summary",  # summary-lock race; capture continues
     r"(?:Runtime|Optimize|User|Deprecation|Future|Pending)Warning:",  # numpy/scipy/py warnings
     r"alignPlatepar: Fit did not converge",                    # self-recovers to original platepar
@@ -686,6 +694,9 @@ def collect_logs(station, max_lines, warning_ignore=None):
         "rms_mode": None,   # RMS's actual day/night mode (ground truth, see below)
         "media_backend": station.media_backend,   # configured (gst/cv2/v4l2)
         "capture_backend": None,                   # actual, from the log (gst/cv2)
+        "star_overflow": False,        # ExtractStars hit its candidate cap (frame skipped)
+        "star_candidates": None,       # candidate stars found (N in "N/M")
+        "star_candidate_limit": None,  # the cap (M in "N/M")
     }
     log_path = _newest_log(station)
     if not log_path:
@@ -718,6 +729,12 @@ def collect_logs(station, max_lines, warning_ignore=None):
 
         if _WATCHDOG_RE.search(line):
             result["last_watchdog_event"] = redact(line.strip())[:300]
+
+        so = _STAR_OVERFLOW_RE.search(line)
+        if so:
+            result["star_overflow"] = True
+            result["star_candidates"] = int(so.group(1))
+            result["star_candidate_limit"] = int(so.group(2))
 
         buf = _BUFFER_RE.search(line)
         if buf:

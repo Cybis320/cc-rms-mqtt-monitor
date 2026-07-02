@@ -31,6 +31,7 @@ CHECK_KEYS = (
     "backend_fallback",   # configured gst but capture fell back to OpenCV (cv2)
     "timelapse_missing",  # a finished frame session's ffmpeg failed (no mp4)
     "timelapse_overdue",  # saving frames but no timelapse mp4 produced in ages
+    "star_extraction_overflow",  # ExtractStars over its candidate cap -> frames skipped
     "log_fatal",          # traceback / ImportError / .so / segfault in the log
     "log_warning",        # WARNING-level lines in the scanned log tail
     "watchdog",           # RMS WATCHDOG died/stale/Restarting event
@@ -360,6 +361,18 @@ def evaluate(metrics, thresholds, disabled=()):
              "Config fov_w=%s deg can't solve the actual FOV (~%s deg): outside "
              "astrometry.net's 0.75-1.5x range -- a fresh auto-calibration would fail"
              % (metrics.get("config_fov_w"), metrics.get("platepar_fov_h")))
+
+    # --- ExtractStars candidate-cap overflow (lost calibration frames) ---
+    # When the candidate list exceeds RMS's cap, ExtractStars skips the frame and
+    # logs "Detected stars: 0" -- so a star-rich (good) field produces no extracted
+    # stars / no CALSTARS for that FF. It's a silent loss of calibration frames;
+    # the fix is raising the candidate-star limit for this camera.
+    if metrics.get("star_overflow"):
+        flag(DEGRADED, "star_extraction_overflow",
+             "Star extraction overflowing (%s candidate stars > %s cap): those "
+             "frames extract 0 stars, losing calibration frames -- the candidate-"
+             "star limit is likely too low for this camera"
+             % (metrics.get("star_candidates"), metrics.get("star_candidate_limit")))
 
     # --- Silent pipeline failure (the ".so missing" class) ---------------
     if (
