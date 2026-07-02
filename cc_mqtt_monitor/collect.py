@@ -516,6 +516,11 @@ _FATAL_PATTERNS = [
     re.compile(r"Segmentation fault|core dumped"),
     re.compile(r"\bMemoryError\b|Cannot allocate memory"),
     re.compile(r"No module named"),
+    # Cython/C build failures at first import (pyximport compiles .pyx on demand):
+    # a broken build crashes StartCapture before RMS logging is up, so this only
+    # ever surfaces via the systemd journal (see collect_journal_fatal).
+    re.compile(r"\bCompileError\b|\bDistutilsExecError\b"),
+    re.compile(r"Building module .* failed"),
 ]
 
 _WATCHDOG_RE = re.compile(r"WATCHDOG:.*(died|stale|Restarting)", re.IGNORECASE)
@@ -750,6 +755,135 @@ def collect_logs(station, max_lines, warning_ignore=None):
             result["buffer_fill_max_recent"] = round(max(recent), 1)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Journal fatal scan: crashes that never reach the RMS log file
+# ---------------------------------------------------------------------------
+# An import/build crash (e.g. pyximport rebuilding a .pyx after a bad update)
+# kills StartCapture BEFORE RMS's file logging is initialised, so the traceback
+# goes to stderr -> the systemd journal, never the RMS log. A log-file scanner
+# structurally can't see it; the station only shows the downstream symptom (a
+# stall) with no root cause. We read the capture unit's journal tail and match
+# the same fatal patterns, so the real error reaches last_error / log_fatal.
+#
+# This only applies to systemd-managed captures (a service/scope journald
+# captures). A capture launched in a terminal (gnome-terminal vte-spawn scope)
+# or screen/tmux writes to that terminal, not the journal, so _capture_unit
+# returns None and this is a clean no-op -- there is nothing to find there.
+
+_JOURNAL_LINES = 400          # journal tail depth to scan per station
+_UNIT_CACHE_FILE = os.path.expanduser("~/.cache/cc-rms-monitor/units.json")
+_UNIT_CACHE = None            # station_id -> systemd unit (e.g. "au0004.service")
+
+
+def _unit_cache():
+    global _UNIT_CACHE
+    if _UNIT_CACHE is None:
+        try:
+            with open(_UNIT_CACHE_FILE) as fh:
+                _UNIT_CACHE = json.load(fh)
+            if not isinstance(_UNIT_CACHE, dict):
+                _UNIT_CACHE = {}
+        except (IOError, OSError, ValueError):
+            _UNIT_CACHE = {}
+    return _UNIT_CACHE
+
+
+def _save_unit_cache():
+    try:
+        os.makedirs(os.path.dirname(_UNIT_CACHE_FILE), exist_ok=True)
+        tmp = _UNIT_CACHE_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(_UNIT_CACHE, fh)
+        os.replace(tmp, _UNIT_CACHE_FILE)
+    except (IOError, OSError):
+        pass
+
+
+def _proc_unit(pid):
+    """The systemd unit owning `pid`, parsed from /proc/<pid>/cgroup -- e.g.
+    'au0004.service'. None if the pid isn't under a real service unit: a
+    terminal/screen scope (vte-spawn-*.scope) or the bare user manager
+    (user@N.service) is NOT a capture service, so its output isn't unit-captured
+    and there's nothing to scan."""
+    if not pid:
+        return None
+    try:
+        with open("/proc/%d/cgroup" % pid) as fh:
+            data = fh.read()
+    except (IOError, OSError):
+        return None
+    # cgroup v2: "0::/system.slice/au0004.service" (system) or
+    # ".../user@1000.service/app.slice/au0004.service" (user service). Take the
+    # innermost '*.service', but never the user manager itself (user@N.service).
+    for part in reversed(data.strip().replace("\0", "").split("/")):
+        part = part.strip()
+        if part.endswith(".service") and not part.startswith("user@"):
+            return part
+    return None
+
+
+def _capture_unit(station, main_pid):
+    """Resolve the station's capture systemd unit. From a live pid's cgroup when
+    available (cached persistently, keyed by station), else the cached value --
+    so a crash that leaves NO live process (the very case we want to explain) is
+    still attributable to the unit we saw it run under. None => not systemd
+    managed / never observed => nothing to scan."""
+    cache = _unit_cache()
+    unit = _proc_unit(main_pid)
+    if unit:
+        if cache.get(station.station_id) != unit:
+            cache[station.station_id] = unit
+            _save_unit_cache()
+        return unit
+    return cache.get(station.station_id)
+
+
+def _journal_tail(unit, lines):
+    """Last `lines` journal messages (text only) for a system OR user unit.
+    Matches both `_SYSTEMD_UNIT` and `_SYSTEMD_USER_UNIT` (OR via '+') so it works
+    regardless of how the service is scoped. Best-effort: no journalctl, no read
+    permission, or any error -> []."""
+    if not shutil.which("journalctl"):
+        return []
+    try:
+        out = subprocess.run(
+            ["journalctl", "_SYSTEMD_UNIT=%s" % unit, "+",
+             "_SYSTEMD_USER_UNIT=%s" % unit, "-n", str(lines),
+             "-o", "cat", "--no-pager"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=15, universal_newlines=True)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return (out.stdout or "").splitlines()
+
+
+def collect_journal_fatal(station, main_pid):
+    """Scan the capture unit's journal tail for fatal errors that never made it
+    to the RMS log (import/build crashes on startup). Returns {} for non-systemd
+    captures or when nothing matches, else {fatal_error_count, last_error,
+    fatal_source:'journal'} mirroring collect_logs so log_fatal fires."""
+    unit = _capture_unit(station, main_pid)
+    if not unit:
+        return {}
+    lines = _journal_tail(unit, _JOURNAL_LINES)
+    if not lines:
+        return {}
+    count, last = 0, None
+    for idx, line in enumerate(lines):
+        for pattern in _FATAL_PATTERNS:
+            if pattern.search(line):
+                count += 1
+                if "Traceback" in line:
+                    last = redact(_extract_traceback(lines, idx))
+                else:
+                    last = redact(line.strip())[:300]
+                break
+    if not count:
+        return {}
+    return {"fatal_error_count": count, "last_error": last,
+            "fatal_source": "journal"}
 
 
 def collect_capture_events(station):
@@ -1169,6 +1303,12 @@ def collect_station(station, max_log_lines, now=None, warning_ignore=None):
     metrics.update(collect_detection(station, now))
     metrics.update(collect_data_access(station))
     metrics.update(collect_logs(station, max_log_lines, warning_ignore))
+    # Startup crashes (import/build failures) die before RMS logging is up, so
+    # they never reach the log file scanned above -- only the systemd journal. If
+    # the log scan found no fatal, check the capture unit's journal so the real
+    # root cause reaches last_error / log_fatal instead of only a downstream stall.
+    if not metrics.get("fatal_error_count"):
+        metrics.update(collect_journal_fatal(station, metrics.get("main_pid")))
     metrics.update(collect_capture_events(station))
     metrics.update(collect_summary(station))
     metrics.update(collect_upload(station, now))

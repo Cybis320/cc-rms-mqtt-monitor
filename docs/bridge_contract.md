@@ -139,6 +139,12 @@ follow one problem class network-wide, across all stations:
   Symptoms that merely *result* from a fault (e.g. *capture process not running*,
   *timelapse not generated*) carry no category — the underlying error surfaces its
   own alert, which is what lands in `code`, so there's no double-tagging.
+  > Startup/build crashes now reach `code` too: an import or Cython-build failure
+  > that dies before RMS logging starts is scanned from the capture's systemd
+  > journal and surfaced as a normal `log_fatal` problem (*"Fatal error in log
+  > (Nx): …ImportError…"*). It carries an optional `fatal_source: "journal"` on
+  > the record for provenance; no bridge change is needed — it classifies as
+  > `code` by its `problems[]` text like any other fatal.
 - If `category_repo_scope` is on, each category alert is **also** published to
   `<category>-<repo>`, where `<repo>` is a short handle for the station's
   `rms_remote` (the official RMS → `upstream`; a fork → its owner, or a

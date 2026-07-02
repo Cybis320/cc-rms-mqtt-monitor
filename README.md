@@ -24,7 +24,7 @@ Per station, each cycle (default 60 s):
 | **Capture process alive** | `RMS.StartCapture` for that station's config is gone |
 | **Mode-aware freshness** | knows from `.config` (`continuous_capture`, `switch_camera_modes`, `save_frames`) + computed **sun elevation** whether to expect `FF_*.fits` (night) or `FramesFiles/*_d.jpg` frame images (day); flags the *right* output going stale and never false-alarms on the idle pipeline |
 | **Silent pipeline failure** | capturing fine but **no `FTPdetectinfo`/`CALSTARS`** produced — the general case of "a missing `.so` / import error broke detection but capture looks alive" |
-| **Fatal log errors** | scans the live log for `Traceback`, `ImportError`, `ModuleNotFoundError`, `cannot open shared object file`, `Segmentation fault`, etc., and reports the last one |
+| **Fatal log errors** | scans the live log for `Traceback`, `ImportError`, `ModuleNotFoundError`, `cannot open shared object file`, `Segmentation fault`, Cython/C build failures, etc., and reports the last one. Also scans the capture's **systemd-journal** tail, so a startup/build crash that dies before RMS logging is up (traceback → stderr → journal, never the log file) still surfaces as the root cause instead of only a downstream stall |
 | **Watchdog events** | RMS's own `WATCHDOG: ... died/stale/Restarting` lines |
 | **Dropped frames / buffer fill** | from the periodic `Buffer fill: …%` log line — and, when frames drop, an attributed **`drop_cause`** (see [Dropped-frame attribution](#dropped-frame-attribution)) |
 | **Pipeline health** | rtspsrc **reconnect churn** and **decoder/concealment errors** counted in the log tail (the symptom of packets lost upstream of decode) |
@@ -74,7 +74,7 @@ the human-readable text.
 | `backend_fallback` | degraded | configured `media_backend: gst` but the log shows capture running on OpenCV (`cv2`) — GStreamer didn't start | — |
 | `timelapse_missing` | degraded | a completed frame session's ffmpeg failed — its `_frametimes.json` exists but no `_frames_timelapse.mp4` | `timelapse_grace_s` (1h) |
 | `timelapse_overdue` | degraded | saving frames but no `_frames_timelapse.mp4` produced in ages (generation not running at all; latitude-independent) | `timelapse_max_age_s` (30h) |
-| `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault in the log | — |
+| `log_fatal` | error | `Traceback`/`ImportError`/`cannot open shared object`/segfault/Cython-build-failure in the RMS log **or** the capture's systemd-journal tail (the latter catches startup crashes that die before RMS logging starts) | — |
 | `log_warning` | degraded | actionable `WARNING`-level lines in the log tail (benign ones filtered — see below) | `log_warning_warn` (1 = any) |
 | `watchdog` | degraded | RMS `WATCHDOG: died/stale/Restarting` event | — |
 | `disk_low` | degraded / error | data partition free space low / critical | `disk_free_warn_gb` (20) / `disk_free_error_gb` (5) |
