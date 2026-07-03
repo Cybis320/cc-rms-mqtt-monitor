@@ -52,7 +52,8 @@ def test_standby_collapses_and_outranks_capture_down():
     assert status == "error"
     assert len(problems) == 1
     assert "not pingable" in problems[0]
-    assert "10.0.0.9" in problems[0]
+    # The camera IP must NOT appear -- it's published to the open feed.
+    assert "10.0.0.9" not in problems[0]
 
 
 def test_transient_still_alerts_normally():
@@ -62,6 +63,20 @@ def test_transient_still_alerts_normally():
     status, problems = health.evaluate(m, T)
     assert any("stalled" in p for p in problems)
     assert not any("pingable" in p for p in problems)
+
+
+def test_usb_camera_never_pinged_or_standby():
+    # A USB/v4l2 device has no camera_host, so camera_reachable returns None
+    # (no ping) and it can never enter camera-unreachable standby -- a USB stall
+    # just alerts as capture_stalled.
+    from cc_mqtt_monitor import diagnose
+
+    class USB:
+        camera_host = None
+    assert diagnose.camera_reachable(USB()) is None
+    monitor._UNREACHABLE.clear()
+    assert monitor._track_unreachable("USB", True, None, 9e9,
+                                      T.camera_unreachable_grace_s) == (False, None)
 
 
 def test_camera_up_but_stalled_does_not_stand_by():

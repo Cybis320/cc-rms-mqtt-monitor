@@ -277,10 +277,11 @@ def evaluate(metrics, thresholds, disabled=()):
     # consumer, the dashboard included, sees the collapsed record rather than the
     # cascade of downstream symptoms.
     if metrics.get("camera_standby"):
+        # Deliberately no camera IP in the text -- this is published to the open
+        # feed; the station_id already identifies which camera.
         flag(ERROR, "camera_unreachable",
-             "Camera %s not pingable for %s -- capture/detection checks suppressed "
-             "while it's unreachable" % (metrics.get("camera_host") or "camera",
-                                         _fmt_dur(metrics.get("camera_unreachable_s"))))
+             "Camera not pingable for %s -- capture/detection checks suppressed "
+             "while it's unreachable" % _fmt_dur(metrics.get("camera_unreachable_s")))
         return state["status"], state["problems"]
 
     # --- Capture process -------------------------------------------------

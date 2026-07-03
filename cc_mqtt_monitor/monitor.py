@@ -125,9 +125,10 @@ def gather(config, maint=None, host_metrics=None):
             reachable = diagnose.camera_reachable(station)
             if reachable is False:
                 _, secs = _track_unreachable(sid, True, False, mono, grace)
-                metrics = {"station_id": sid, "camera_host": station.camera_host,
-                           "camera_ping_ok": False, "camera_standby": True,
-                           "camera_unreachable_s": round(secs, 1)}
+                # NB: no camera_host -- the camera IP is never published to the
+                # open feed (it'd leak internal network structure / an attack target).
+                metrics = {"station_id": sid, "camera_ping_ok": False,
+                           "camera_standby": True, "camera_unreachable_s": round(secs, 1)}
                 state = build_state(metrics, config.thresholds, config.host_name,
                                     _iso(now), disabled, host_metrics)
                 states.append(decorate(state, station))
@@ -156,8 +157,7 @@ def gather(config, maint=None, host_metrics=None):
         standby, secs = _track_unreachable(sid, stalled, reachable, mono, grace)
         metrics["camera_standby"] = standby
         if reachable is not None:
-            metrics["camera_host"] = station.camera_host
-            metrics["camera_ping_ok"] = reachable
+            metrics["camera_ping_ok"] = reachable   # bool only; camera IP not published
         if secs is not None:
             metrics["camera_unreachable_s"] = round(secs, 1)
         if standby:
