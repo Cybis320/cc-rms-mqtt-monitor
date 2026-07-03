@@ -162,8 +162,15 @@ class Config:
     topic_prefix: str = "stations"
 
     interval_seconds: int = 60
-    # Number of trailing log lines scanned per station per cycle.
+    # Number of trailing log lines scanned per station per cycle (memory cap).
     log_tail_lines: int = 4000
+    # Time window for the log-scan alerts (log_fatal / log_warning / watchdog /
+    # decoder / reconnect): only matches whose log timestamp is within this many
+    # seconds of now are counted, so those alerts clear a FIXED time after the
+    # last occurrence -- not "once the offending line scrolls out of the N-line
+    # tail", which varies with how fast each station logs. 0 disables the window
+    # (revert to line-count clearing).
+    log_window_s: int = 7200   # 120 min
 
     # Maintenance detection: mark records "expected disruption" so the bridge
     # suppresses alerts for them. Host just rebooted (uptime below this), or an

@@ -137,7 +137,7 @@ def gather(config, maint=None, host_metrics=None):
             # recovered (or ping now undeterminable) -> fall through to full collect
 
         metrics = collect_station(station, config.log_tail_lines, now,
-                                  config.log_warning_ignore)
+                                  config.log_warning_ignore, config.log_window_s)
         # Adaptive escalation: when this station is dropping frames the cheap
         # host signals can't explain, spend a heavy probe (keyframe + ping) to
         # confirm the camera/link verdict -- rate-limited/backed-off per station.
@@ -220,7 +220,7 @@ def run_diagnose(config, station_id=None):
     reports = []
     for station in stations:
         metrics = collect_station(station, config.log_tail_lines, now,
-                                  config.log_warning_ignore)
+                                  config.log_warning_ignore, config.log_window_s)
         metrics.update(diagnose.run_probe(station, now))   # force, no gating
         state = build_state(metrics, config.thresholds, config.host_name,
                             _iso(now), disabled, host_state)

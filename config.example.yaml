@@ -48,7 +48,13 @@ topic_prefix: stations
 # stations/<id>/health topics.
 
 interval_seconds: 60
-log_tail_lines: 4000
+log_tail_lines: 4000      # trailing log lines scanned per station (memory cap)
+# Time window for the log-scan alerts (log_fatal / log_warning / watchdog /
+# decoder / reconnect): only matches within this many seconds of now count, so
+# those alerts clear a FIXED time after the last occurrence -- not when the line
+# scrolls out of the log_tail_lines window (which varies with log verbosity).
+# 0 disables it (revert to line-count clearing).
+log_window_s: 7200        # 120 min
 host_name: null           # defaults to the system hostname
 
 # Maintenance detection: records get maintenance:true (so the bridge mutes alerts

@@ -685,9 +685,15 @@ def _extract_traceback(lines, idx):
     return lines[idx].strip()
 
 
-def collect_logs(station, max_lines, warning_ignore=None):
+def collect_logs(station, max_lines, warning_ignore=None, now=None, window_s=None):
     """Scan the newest log for fatal errors, watchdog events, and buffer stats.
-    `warning_ignore` adds patterns to the built-in benign-warning filter."""
+    `warning_ignore` adds patterns to the built-in benign-warning filter.
+
+    `window_s` (with `now`) time-bounds the discrete-event alerts (fatal / warning
+    / watchdog / decoder / reconnect): a match counts only if its log timestamp is
+    within `now - window_s`, so those alerts clear a FIXED time after the last
+    occurrence instead of when the line scrolls out of the `max_lines` tail (which
+    varies with how fast the station logs). None/0 => no time bound (line-count)."""
     result = {
         "log_file": None,
         "log_age_s": None,
@@ -719,26 +725,40 @@ def collect_logs(station, max_lines, warning_ignore=None):
 
     ignore_re = _compile_warning_ignore(warning_ignore)
     lines = _tail(log_path, max_lines)
+    now = now or time.time()
+    cutoff = (now - window_s) if window_s else None
+    last_ts = None    # carried forward so an un-timestamped traceback body line
+                      # inherits the timestamp of the log call it belongs to
     for idx, line in enumerate(lines):
+        ts = _parse_log_ts(line)
+        if ts is not None:
+            last_ts = ts
+        # Time-window gate for the discrete-event alerts. Undeterminable time
+        # (no timestamp seen yet) fails OPEN -> counted, so we never silently drop
+        # a real error we can't date.
+        in_window = cutoff is None or last_ts is None or last_ts >= cutoff
+
         is_fatal = False
         for pattern in _FATAL_PATTERNS:
             if pattern.search(line):
                 is_fatal = True
-                result["fatal_error_count"] += 1
-                # Redact before storing: these fields are published to a public
-                # feed and raw RMS lines can carry IPs / device-URL credentials.
-                if "Traceback" in line:
-                    result["last_error"] = redact(_extract_traceback(lines, idx))
-                else:
-                    result["last_error"] = redact(line.strip())[:300]
+                if in_window:
+                    result["fatal_error_count"] += 1
+                    # Redact before storing: these fields are published to a public
+                    # feed and raw RMS lines can carry IPs / device-URL credentials.
+                    if "Traceback" in line:
+                        result["last_error"] = redact(_extract_traceback(lines, idx))
+                    else:
+                        result["last_error"] = redact(line.strip())[:300]
                 break
 
         # WARNING-level lines that are neither fatal nor a known-benign pattern.
-        if not is_fatal and _WARNING_RE.search(line) and not ignore_re.search(line):
+        if (in_window and not is_fatal and _WARNING_RE.search(line)
+                and not ignore_re.search(line)):
             result["warning_count"] += 1
             result["last_warning"] = redact(line.strip())[:300]
 
-        if _WATCHDOG_RE.search(line):
+        if in_window and _WATCHDOG_RE.search(line):
             result["last_watchdog_event"] = redact(line.strip())[:300]
 
         buf = _BUFFER_RE.search(line)
@@ -747,12 +767,13 @@ def collect_logs(station, max_lines, warning_ignore=None):
             result["buffer_fill_pct"] = fill
             result["dropped_frames_10min"] = int(buf.group(2))
             result["dropped_frames_session"] = int(buf.group(3))
-            buffer_points.append((_parse_log_ts(line), fill))
+            buffer_points.append((ts, fill))
 
-        if _PIPELINE_BUILD_RE.search(line):
-            result["pipeline_reconnects"] += 1
-        elif _DECODER_ERR_RE.search(line):
-            result["decoder_errors"] += 1
+        if in_window:
+            if _PIPELINE_BUILD_RE.search(line):
+                result["pipeline_reconnects"] += 1
+            elif _DECODER_ERR_RE.search(line):
+                result["decoder_errors"] += 1
 
         # RMS's actual day/night mode (ground truth from the in-process flag).
         # Lines are chronological, so the last match in the tail is the newest.
@@ -1345,7 +1366,8 @@ def collect_mode(station, now=None):
     return result
 
 
-def collect_station(station, max_log_lines, now=None, warning_ignore=None):
+def collect_station(station, max_log_lines, now=None, warning_ignore=None,
+                    log_window_s=None):
     """Run every collector and merge into one flat metrics dict."""
     now = now or time.time()
     metrics = {"station_id": station.station_id}
@@ -1357,7 +1379,8 @@ def collect_station(station, max_log_lines, now=None, warning_ignore=None):
     metrics.update(collect_stream_bandwidth(station, now))
     metrics.update(collect_detection(station, now))
     metrics.update(collect_data_access(station))
-    metrics.update(collect_logs(station, max_log_lines, warning_ignore))
+    metrics.update(collect_logs(station, max_log_lines, warning_ignore,
+                                now=now, window_s=log_window_s))
     # Startup crashes (import/build failures) die before RMS logging is up, so
     # they never reach the log file scanned above -- only the systemd journal. If
     # the log scan found no fatal, check the capture unit's journal so the real
