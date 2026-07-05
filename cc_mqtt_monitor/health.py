@@ -240,8 +240,17 @@ def classify_drops(metrics, host_metrics, thresholds):
         conf = "high" if peak is not None else ("medium" if host_known else "low")
         return verdict(CAUSE_CAMERA_BW, conf, "; ".join(detail))
 
-    # 5) Nothing positive yet -- real drops, host looks clean, no decoder symptom
-    #    captured in the tail. This is exactly when escalating to a probe pays off.
+    # 5) Nothing positive from the cheap signals -- real drops, host clean, no
+    #    decoder/reconnect symptom in the tail. If a probe has already run it has
+    #    EXCLUDED host, link loss and bandwidth (checked above), so the frames are
+    #    being lost at the camera itself; otherwise a probe is what confirms that.
+    if "probe_ping_note" in metrics:   # a probe was attached (run_probe ran)
+        detail = ["probed: no host/network/bandwidth cause"]
+        mbps = _num(metrics, "probe_stream_mbps") or _num(metrics, "stream_mbps")
+        if mbps is not None:
+            detail.append("steady %.1f Mbps" % mbps)
+        detail.append("frames lost at the camera -- check the camera itself")
+        return verdict(CAUSE_UNCERTAIN, "medium", "; ".join(detail))
     return verdict(CAUSE_UNCERTAIN, "low",
                    "drops with no host signal; probe to confirm camera/link")
 

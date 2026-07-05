@@ -63,6 +63,23 @@ def test_no_drops_no_attribution():
     assert health.classify_drops({"dropped_frames_10min": 0}, {}, T)["drop_cause"] is None
 
 
+def test_uncertain_message_depends_on_whether_probe_ran():
+    # Drops with a clean host and no decoder/reconnect symptom.
+    base = {"dropped_frames_10min": 300, "buffer_fill_max_recent": 11.0,
+            "decoder_errors": 0, "pipeline_reconnects": 0, "stream_mbps": 8.1}
+    # Pre-probe: asks for a probe.
+    pre = health.classify_drops(base, {}, T)
+    assert pre["drop_cause"] == health.CAUSE_UNCERTAIN
+    assert "probe to confirm" in pre["drop_detail"]
+    # Post-probe (probe attached, all clean): points at the camera, no "confirm".
+    probed = dict(base, probe_ping_note=None, probe_ping_loss_pct=0.0,
+                  probe_keyframe_peak_kb=256.3, probe_stream_mbps=8.1)
+    post = health.classify_drops(probed, {}, T)
+    assert post["drop_cause"] == health.CAUSE_UNCERTAIN
+    assert "probe to confirm" not in post["drop_detail"]
+    assert "check the camera" in post["drop_detail"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
