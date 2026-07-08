@@ -64,6 +64,38 @@ def test_no_timelapse_at_all_is_none():
     assert res["timelapse_mp4_present"] is False
 
 
+from cc_mqtt_monitor import health                         # noqa: E402
+from cc_mqtt_monitor.config import Thresholds              # noqa: E402
+
+_T = Thresholds()
+# Actively saving frames (fresh), long-running capture (not settling).
+_SAVING = dict(capture_alive=True, expected_output="frames", newest_fits_age_s=None,
+               newest_frame_age_s=30, capture_age_s=999999, capture_wait_seconds=0)
+
+
+def _overdue(**tl):
+    _s, problems = health.evaluate(dict(_SAVING, **tl), _T)
+    return any("while saving frames" in p for p in problems)
+
+
+def test_overdue_present_but_old_mp4_does_not_fire():
+    # A present-but-old newest mp4 = no recent completed session, NOT a fault.
+    assert not _overdue(newest_timelapse_age_s=40 * 3600, timelapse_mp4_present=True)
+
+
+def test_overdue_no_mp4_ever_fires():
+    assert _overdue(newest_timelapse_age_s=None, frames_data_age_s=40 * 3600)
+
+
+def test_overdue_last_session_failed_fires():
+    # Newest completed session produced no mp4 (ffmpeg failed) and it's old.
+    assert _overdue(newest_timelapse_age_s=40 * 3600, timelapse_mp4_present=False)
+
+
+def test_overdue_recent_mp4_does_not_fire():
+    assert not _overdue(newest_timelapse_age_s=10 * 3600, timelapse_mp4_present=True)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

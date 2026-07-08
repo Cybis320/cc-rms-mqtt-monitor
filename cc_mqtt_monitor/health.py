@@ -399,11 +399,20 @@ def evaluate(metrics, thresholds, disabled=()):
         newest_tl = metrics.get("newest_timelapse_age_s")
         frames_data = metrics.get("frames_data_age_s")
         overdue = None
-        if newest_tl is not None:
+        # Only "overdue" if the pipeline is genuinely failing to produce an mp4:
+        #   - frames are being saved but NO timelapse mp4 exists at all, or
+        #   - the newest COMPLETED session failed to produce its mp4.
+        # A present-but-old newest mp4 (timelapse_mp4_present is True) just means no
+        # new session has completed recently (skipped night / long or gapped
+        # session) -- NOT a fault. Firing on wall-clock age alone false-positives on
+        # healthy stations (observed 2026-07-08: 9 healthy AU + USC0F cams, all with
+        # mp4 present).
+        if newest_tl is None:
+            if frames_data is not None and frames_data > thresholds.timelapse_max_age_s:
+                overdue = frames_data
+        elif metrics.get("timelapse_mp4_present") is False:
             if newest_tl > thresholds.timelapse_max_age_s:
                 overdue = newest_tl
-        elif frames_data is not None and frames_data > thresholds.timelapse_max_age_s:
-            overdue = frames_data  # frames accumulating but no mp4 ever produced
         if overdue is not None:
             flag(DEGRADED, "timelapse_overdue",
                  "No frames timelapse (FramesFiles/*_frames_timelapse.mp4) generated "
