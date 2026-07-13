@@ -704,6 +704,7 @@ def collect_logs(station, max_lines, warning_ignore=None, now=None, window_s=Non
         "last_watchdog_event": None,
         "buffer_fill_pct": None,
         "buffer_fill_max_recent": None,
+        "buffer_fill_max_leadup": None,
         "dropped_frames_10min": None,
         "dropped_frames_session": None,
         "pipeline_reconnects": 0,
@@ -764,10 +765,11 @@ def collect_logs(station, max_lines, warning_ignore=None, now=None, window_s=Non
         buf = _BUFFER_RE.search(line)
         if buf:
             fill = float(buf.group(1))
+            session = int(buf.group(3))
             result["buffer_fill_pct"] = fill
             result["dropped_frames_10min"] = int(buf.group(2))
-            result["dropped_frames_session"] = int(buf.group(3))
-            buffer_points.append((ts, fill))
+            result["dropped_frames_session"] = session
+            buffer_points.append((ts, fill, session))
 
         if in_window:
             if _PIPELINE_BUILD_RE.search(line):
@@ -781,18 +783,44 @@ def collect_logs(station, max_lines, warning_ignore=None, now=None, window_s=Non
         if mode:
             result["rms_mode"] = "day" if mode.group(1) == "True" else "night"
 
-    # Peak buffer fill in the recent window -- the back-pressure signal, since the
-    # fill at the drop line has usually recovered to baseline. Prefer the
-    # timestamped window; fall back to the last N points if timestamps don't parse.
+    # Peak buffer fill in the recent window. INFORMATIONAL ONLY -- it includes the
+    # drop line itself, so it is not safe to read as a cause (see below). Prefer
+    # the timestamped window; fall back to the last N points if timestamps don't
+    # parse.
     if buffer_points:
-        timed = [(t, f) for t, f in buffer_points if t is not None]
+        timed = [(t, f) for t, f, _ in buffer_points if t is not None]
         if timed:
             newest = timed[-1][0]
             recent = [f for t, f in timed if 0 <= newest - t <= _SPIKE_WINDOW_S]
         else:
-            recent = [f for _, f in buffer_points[-_SPIKE_WINDOW_POINTS:]]
+            recent = [f for _, f, _ in buffer_points[-_SPIKE_WINDOW_POINTS:]]
         if recent:
             result["buffer_fill_max_recent"] = round(max(recent), 1)
+
+    # Peak buffer fill STRICTLY BEFORE the drop -- the actual back-pressure
+    # discriminator. Back-pressure means the consumer fell behind and the buffer
+    # was ALREADY backing up when frames started dropping, so the elevated fill
+    # shows on the lines PRECEDING the drop. The fill AT the drop line is
+    # concurrent with the event and proves nothing: a pipeline reconnect tears the
+    # stream down (frames dropped) and the rebuilt pipeline reports a large startup
+    # fill on that very line -- a consequence, not a cause. Locate the drop by the
+    # SESSION counter (monotonic, unlike the 10-min rolling count) increasing, then
+    # take the max fill over the lead-up window before it. No drop in the tail =>
+    # None (can't assess), which never claims back-pressure.
+    drop_idx = None
+    for i in range(1, len(buffer_points)):
+        if buffer_points[i][2] > buffer_points[i - 1][2]:
+            drop_idx = i
+    if drop_idx is not None:
+        lead = buffer_points[:drop_idx]
+        drop_ts = buffer_points[drop_idx][0]
+        timed_lead = [(t, f) for t, f, _ in lead if t is not None]
+        if drop_ts is not None and timed_lead:
+            vals = [f for t, f in timed_lead if 0 <= drop_ts - t <= _SPIKE_WINDOW_S]
+        else:
+            vals = [f for _, f, _ in lead[-_SPIKE_WINDOW_POINTS:]]
+        if vals:
+            result["buffer_fill_max_leadup"] = round(max(vals), 1)
 
     return result
 

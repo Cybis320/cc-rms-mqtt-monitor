@@ -144,13 +144,22 @@ The elimination order (cheapest/strongest first):
 
 | `drop_cause` | Decided by | Signals |
 |---|---|---|
-| `cpu/io back-pressure` | the consumer fell behind | appsink fill **spiked** (recent max, since it recovers by the drop line) — `buffer_fill_max_recent`; host CPU%/iowait% shown as context, not as the trigger |
+| `cpu/io back-pressure` | the consumer fell behind | appsink fill was **already elevated in the lead-up to** the drop — `buffer_fill_max_leadup` (peak *strictly before* the drop line). Requires **zero** reconnects, since every reconnect emits a startup fill spike. Host CPU%/iowait% shown as context, not as the trigger |
 | `network: kernel UDP buffer` | socket overflow (raise `rmem_max`) | `udp_rcvbuf_errors_per_min` climbing |
 | `network: NIC/wire` | the link itself shedding packets | `nic_rx_errors_per_min` climbing |
 | `network: IP fragmentation` | fragments lost on reassembly | `ip_reasm_fails_per_min` climbing |
 | `network: link packet loss` | sustained loss to the camera | probed `ping` loss% |
-| `camera/link bandwidth` | damaged input, **host clean** | decoder/concealment errors + reconnects, with delivered Mbps / probed keyframe peak |
+| `camera/link bandwidth` | damaged input, **host clean** | decoder/concealment errors, or **any** reconnect (the stream went down, so the frames in that gap are gone), with delivered Mbps / probed keyframe peak |
 | `uncertain` | real drops, nothing positive yet | → triggers a probe to confirm |
+
+**Why the fill is read from the lead-up, not the drop line.** Back-pressure means
+the buffer was *already* backing up when frames began dropping, so the elevated
+fill shows on the lines **preceding** the drop. The fill sampled *at* the drop
+line proves nothing: a pipeline reconnect tears the stream down (frames lost) and
+the rebuilt pipeline reports a large **startup** fill on that very line — a
+consequence, not a cause. So the peak is taken strictly before the drop (located
+via the monotonic *session* drop counter), and any reconnect in the window
+disqualifies the spike outright.
 
 All of the above is `/proc`- and `stat`-cheap, so it runs every cycle even on a
 Pi. The two **heavy** confirmations — `ffprobe` of a recent segment for the

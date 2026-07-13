@@ -167,18 +167,20 @@ def classify_drops(metrics, host_metrics, thresholds):
                 "drop_detail": detail}
 
     # 1) CPU / I-O back-pressure: the consumer fell behind and the appsink buffer
-    #    SPIKED in the lead-up to the drop. We key on the recent MAX fill, not the
-    #    fill at the drop line (which has usually recovered to baseline by the time
-    #    the 10-min count logs). CPU% is deliberately NOT a trigger -- a busy Pi
-    #    runs hot whether or not it drops, so the spike is the discriminator; CPU/
-    #    iowait appear only as context to hint cpu- vs disk-bound.
-    #    BUT: every fresh (re)connection produces a brief startup buffer-fill
-    #    spike, so a spike riding WITH reconnect churn is that transient, not
-    #    back-pressure -- only trust the spike on a stable (non-reconnecting)
-    #    stream, else fall through to the camera/link verdict below.
-    spike = _num(metrics, "buffer_fill_max_recent")
+    #    was ALREADY backing up when frames started dropping. We key on the peak
+    #    fill STRICTLY BEFORE the drop (buffer_fill_max_leadup), never the fill at
+    #    the drop line: that one is concurrent with the event and proves nothing.
+    #    CPU% is deliberately NOT a trigger -- a busy Pi runs hot whether or not it
+    #    drops, so the lead-up spike is the discriminator; CPU/iowait appear only
+    #    as context to hint cpu- vs disk-bound.
+    #    BUT: EVERY fresh (re)connection produces a startup buffer-fill spike, so a
+    #    single reconnect anywhere in the scanned window is enough to make the
+    #    spike untrustworthy -- this is NOT the pipeline_reconnects_warn "churn is
+    #    a problem" question, it's "can this spike be believed at all". Any
+    #    reconnect => fall through to the camera/link verdict below.
+    spike = _num(metrics, "buffer_fill_max_leadup")
     reconnects = metrics.get("pipeline_reconnects") or 0
-    stable = reconnects < thresholds.pipeline_reconnects_warn
+    stable = reconnects == 0
     if _hot(spike, thresholds.buffer_fill_spike_pct) and stable:
         ctx = []
         cpu_busy = _num(h, "cpu_busy_pct")
@@ -220,12 +222,17 @@ def classify_drops(metrics, host_metrics, thresholds):
     decoder_err = metrics.get("decoder_errors") or 0
     host_known = any(_num(h, k) is not None for k in
                      ("cpu_busy_pct", "nic_rx_errors_per_min"))
-    if decoder_err >= thresholds.decoder_errors_warn or reconnects >= thresholds.pipeline_reconnects_warn:
+    # ANY reconnect explains a drop burst: the stream went down, so the frames in
+    # that gap are simply gone. Sustained churn (>= pipeline_reconnects_warn) says
+    # the camera won't stay up at all; a single one is a one-off stream drop. Both
+    # are camera/link, not host back-pressure.
+    if decoder_err >= thresholds.decoder_errors_warn or reconnects:
         detail = []
         if reconnects >= thresholds.pipeline_reconnects_warn:
             detail.append("%d reconnects (camera dropping the stream)" % reconnects)
         elif reconnects:
-            detail.append("%d reconnects" % reconnects)
+            detail.append("%d reconnect%s (stream dropped and rebuilt)"
+                          % (reconnects, "" if reconnects == 1 else "s"))
         if decoder_err:
             detail.append("%d decoder errors" % decoder_err)
         peak = _num(metrics, "probe_keyframe_peak_kb")
