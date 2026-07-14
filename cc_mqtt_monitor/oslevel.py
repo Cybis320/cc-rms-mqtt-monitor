@@ -143,17 +143,93 @@ _DISK_ERR_RE = re.compile(
 # error -- treated as the severe case.
 _FS_READONLY_RE = re.compile(r"read-only", re.IGNORECASE)
 
+# Block-device names as they appear anywhere in a kernel line -- after "on dev",
+# in "EXT4-fs (sdb1):", in "sd 0:0:0:0: [sdb]", etc. Word-anchored so a token
+# inside a hostname (e.g. "EliteCamSFF12") can't be mistaken for a device.
+_DEV_TOKEN_RE = re.compile(
+    r"\b(sd[a-z]+\d*|mmcblk\d+(?:p\d+)?|nvme\d+n\d+(?:p\d+)?|"
+    r"vd[a-z]+\d*|xvd[a-z]+\d*|hd[a-z]+\d*|dm-\d+|md\d+)\b"
+)
 
-def scan_disk_errors(max_lines=1500, lines=None, note=None):
+# Partition -> whole disk, so an error reported on sdb1 is attributed to sdb (the
+# device the OS/RMS_data mounts are also resolved to).
+_PARTITION_RES = (
+    re.compile(r"^(mmcblk\d+|nvme\d+n\d+|loop\d+)p\d+$"),
+    re.compile(r"^((?:sd|vd|xvd|hd)[a-z]+)\d+$"),
+)
+
+
+def _base_disk(dev):
+    """'sdb1'->'sdb', 'mmcblk0p2'->'mmcblk0', 'nvme0n1p1'->'nvme0n1'."""
+    for rex in _PARTITION_RES:
+        match = rex.match(dev)
+        if match:
+            return match.group(1)
+    return dev
+
+
+def _mount_device(path):
+    """Base disk backing `path`, or None. Resolved via the LONGEST matching mount
+    point in /proc/mounts, so a data dir on its own mount resolves to that device
+    rather than to root."""
+    real = os.path.realpath(path)
+    best_len, best_dev = -1, None
+    try:
+        with open("/proc/mounts") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) < 2 or not parts[0].startswith("/dev/"):
+                    continue
+                mnt = parts[1].replace("\\040", " ")   # /proc/mounts escapes spaces
+                if real == mnt or real.startswith(mnt.rstrip("/") + "/"):
+                    if len(mnt) > best_len:
+                        best_len, best_dev = len(mnt), parts[0]
+    except (IOError, OSError):
+        return None
+    if not best_dev:
+        return None
+    # realpath resolves /dev/disk/by-uuid/... and /dev/mapper/... to the real node.
+    return _base_disk(os.path.basename(os.path.realpath(best_dev)))
+
+
+def _relevant_disks(data_paths):
+    """The disks that actually matter: the one backing the OS root, plus the one
+    backing each station's RMS data dir. An I/O error on ANY other device -- a USB
+    stick, a scratch drive, a camera SD reader -- is not a station problem."""
+    disks = set()
+    for path in ["/"] + list(data_paths or []):
+        dev = _mount_device(path)
+        if dev:
+            disks.add(dev)
+    return disks
+
+
+def _names_only_other_disks(line, relevant):
+    """True if the line names device(s) and NONE of them back the OS / RMS data.
+
+    A line naming no device at all is never filtered out (we can't attribute it, so
+    fail OPEN rather than silently drop a real error)."""
+    devs = {_base_disk(d) for d in _DEV_TOKEN_RE.findall(line)}
+    return bool(devs) and not (devs & relevant)
+
+
+def scan_disk_errors(max_lines=1500, lines=None, note=None, data_paths=None):
     """Count storage I/O-failure lines in the recent kernel log.
 
     `disk_fs_readonly` flags the severe case (a filesystem remounted read-only).
-    Shares the kernel-log read with scan_oom when `lines` is passed in."""
+    Shares the kernel-log read with scan_oom when `lines` is passed in.
+
+    `data_paths` (the stations' RMS data dirs) scopes the scan to the devices
+    backing the OS root and RMS data. Errors on unrelated storage are counted
+    separately into `disk_error_other_dev_count` -- reported, never alerted, so an
+    ignored failing USB stick is visible but doesn't page anyone. Omit data_paths
+    to count every device (the old behaviour)."""
     result = {
         "disk_error_count": 0,
         "last_disk_error": None,
         "disk_fs_readonly": False,
         "disk_error_note": None,
+        "disk_error_other_dev_count": 0,
     }
     if lines is None:
         lines, note = _kernel_log_lines(max_lines)
@@ -161,12 +237,20 @@ def scan_disk_errors(max_lines=1500, lines=None, note=None):
         result["disk_error_note"] = note
         return result
 
+    # Empty set (paths unresolvable) => no scoping, count everything: better a
+    # false alarm than silently dropping a genuine root/data-disk failure.
+    relevant = _relevant_disks(data_paths) if data_paths is not None else set()
+
     for line in lines:
-        if _DISK_ERR_RE.search(line):
-            result["disk_error_count"] += 1
-            result["last_disk_error"] = redact(line.strip())[:300]
-            if _FS_READONLY_RE.search(line):
-                result["disk_fs_readonly"] = True
+        if not _DISK_ERR_RE.search(line):
+            continue
+        if relevant and _names_only_other_disks(line, relevant):
+            result["disk_error_other_dev_count"] += 1
+            continue
+        result["disk_error_count"] += 1
+        result["last_disk_error"] = redact(line.strip())[:300]
+        if _FS_READONLY_RE.search(line):
+            result["disk_fs_readonly"] = True
     return result
 
 
@@ -465,19 +549,23 @@ def collect_ip_reasm():
     return result
 
 
-def collect_host(scan_oom_events=True, udp=False, cam_interfaces=None):
+def collect_host(scan_oom_events=True, udp=False, cam_interfaces=None,
+                 data_paths=None):
     """Host-wide metrics dict. `udp=True` adds UDP RcvbufErrors + IP reassembly
     stats (only worth collecting when a station uses protocol: udp). CPU/I-O
     pressure and NIC errors are always collected -- they're cheap and apply to
     every dropped-frame attribution regardless of transport. `cam_interfaces`
-    scopes NIC-error counters to the camera-facing NIC(s); None sums all."""
+    scopes NIC-error counters to the camera-facing NIC(s); None sums all.
+    `data_paths` (the stations' RMS data dirs) scopes disk-error counting to the
+    devices backing the OS root and RMS data; None counts every device."""
     metrics = read_meminfo()
     metrics.update(read_psi_memory())
     if scan_oom_events:
         # One kernel-log read shared by the OOM and disk-error scanners.
         klines, knote = _kernel_log_lines(1500)
         metrics.update(scan_oom(lines=klines, note=knote))
-        metrics.update(scan_disk_errors(lines=klines, note=knote))
+        metrics.update(scan_disk_errors(lines=klines, note=knote,
+                                        data_paths=data_paths))
     metrics["uptime_s"] = _uptime()
     metrics.update(collect_cpu_pressure())
     metrics.update(collect_nic_errors(cam_interfaces))

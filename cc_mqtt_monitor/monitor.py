@@ -183,7 +183,12 @@ def gather_host(config, maint=None):
     # host it resolves to that one NIC. Hostnames / unresolvable -> None => all NICs.
     cam_ifaces = {ifc for ifc in (iface_for_ip(s.camera_host) for s in stations
                                   if s.camera_host) if ifc}
-    metrics = collect_host(udp=udp, cam_interfaces=(cam_ifaces or None))
+    # Scope kernel disk-error counting to the devices backing the OS root and the
+    # stations' RMS data dirs -- an I/O error on some unrelated drive (a USB stick,
+    # a scratch disk) is not a station problem and must not raise disk_errors.
+    data_paths = {s.data_dir for s in stations if s.data_dir}
+    metrics = collect_host(udp=udp, cam_interfaces=(cam_ifaces or None),
+                           data_paths=data_paths)
     state = build_host_state(metrics, config.thresholds, config.host_name,
                              _iso(time.time()), disabled)
     # A host can span several groups; list the distinct ones plus its stations,

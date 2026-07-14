@@ -86,7 +86,7 @@ the human-readable text.
 | `mem_pressure` | degraded / error | host memory **pressure** (PSI) — `full avg10` spiking / sustained `full avg60` high (pre-OOM, scale-independent) | `mem_psi_full_avg10_warn` (10) / `mem_psi_full_avg60_error` (10) |
 | `udp_rcvbuf_errors` | degraded | host UDP RcvbufErrors growth rate (only when a station uses `protocol: udp`) | `udp_rcvbuf_errors_per_min_warn` (0 = any increase) |
 | `nic_errors` | degraded | camera-facing NIC RX **hardware**-error growth (wire/cable/duplex/port; excludes benign `rx_dropped`) | `nic_rx_errors_per_min_warn` (0 = any increase) |
-| `disk_errors` | degraded / error | kernel disk I/O errors / a **read-only remount** (a failing disk — incl. worn SD cards). Medium-agnostic; does NOT fire on a merely-slow card the way an iowait threshold would | — |
+| `disk_errors` | degraded / error | kernel disk I/O errors / a **read-only remount** (a failing disk — incl. worn SD cards). Medium-agnostic; does NOT fire on a merely-slow card the way an iowait threshold would. **Scoped** to the devices backing the OS root and the stations' RMS data dirs (resolved via the longest matching mount, so a data dir on its own disk is covered) — errors on unrelated storage (a USB stick, a scratch drive) land in `disk_error_other_dev_count` and never alert. A line naming no device fails **open** and still counts | — |
 
 Day/night for `capture_stalled` comes from the sun (matching RMS's own switch
 horizon + programmed delays), not from frame creation. Conditional checks stay
