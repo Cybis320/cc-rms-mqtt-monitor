@@ -518,12 +518,29 @@ def collect_detection(station, now=None):
 
 # Patterns that indicate a fatal/structural failure independent of any specific
 # error message -- this is the general solution for "a stage silently died".
+# Dynamic-loader diagnostics. Fatal ONLY when they are not a routine optional-plugin
+# probe. RMS funnels GStreamer/GLib output through its own logger at INFO level, and
+# GStreamer probes for OPTIONAL plugins at startup -- e.g. the CUDA plugin looking for
+# libnvrtc.so on a box with no NVIDIA stack:
+#   ...-INFO-Logger-line:264 - cudanvrtc ...: Could not open nvrtc library libnvrtc.so:
+#   cannot open shared object file: No such file or directory
+# Nothing is broken there: the plugin is simply skipped. A loader failure that really
+# kills RMS arrives with a Traceback / ImportError (matched below regardless of level),
+# or in the systemd journal before RMS logging is up -- journal lines carry no RMS level
+# field, so they are never demoted and still count.
+_LOADER_PATTERNS = (
+    re.compile(r"cannot open shared object file"),
+    re.compile(r"undefined symbol"),
+)
+
+# An RMS log line whose level makes it non-fatal on its own, e.g.
+# "2026/07/14 05:10:01-INFO-Logger-line:264 - ...".
+_INFO_LEVEL_RE = re.compile(r"-(?:INFO|DEBUG)-")
+
 _FATAL_PATTERNS = [
     re.compile(r"Traceback \(most recent call last\)"),
     re.compile(r"\bModuleNotFoundError\b"),
     re.compile(r"\bImportError\b"),
-    re.compile(r"cannot open shared object file"),
-    re.compile(r"undefined symbol"),
     re.compile(r"Segmentation fault|core dumped"),
     re.compile(r"\bMemoryError\b|Cannot allocate memory"),
     re.compile(r"No module named"),
@@ -532,7 +549,25 @@ _FATAL_PATTERNS = [
     # ever surfaces via the systemd journal (see collect_journal_fatal).
     re.compile(r"\bCompileError\b|\bDistutilsExecError\b"),
     re.compile(r"Building module .* failed"),
-]
+    # Kept last so a line carrying BOTH (e.g. "ImportError: libfoo.so: cannot open
+    # shared object file") matches the real fatal first and is never demoted.
+] + list(_LOADER_PATTERNS)
+
+
+def _fatal_match(line):
+    """The fatal pattern this line trips, or None if it is not a fatal.
+
+    A loader diagnostic on an INFO/DEBUG line is an optional-plugin probe miss, not
+    a failure, so it is skipped -- but the scan CONTINUES, so an INFO line that also
+    carries a real fatal (ImportError, segfault, ...) still counts."""
+    demote = _INFO_LEVEL_RE.search(line) is not None
+    for pattern in _FATAL_PATTERNS:
+        if not pattern.search(line):
+            continue
+        if demote and pattern in _LOADER_PATTERNS:
+            continue
+        return pattern
+    return None
 
 _WATCHDOG_RE = re.compile(r"WATCHDOG:.*(died|stale|Restarting)", re.IGNORECASE)
 # RMS log level field, e.g. "2026/06/20 03:08:33-WARNING-BufferedCapture-line:..".
@@ -739,19 +774,15 @@ def collect_logs(station, max_lines, warning_ignore=None, now=None, window_s=Non
         # a real error we can't date.
         in_window = cutoff is None or last_ts is None or last_ts >= cutoff
 
-        is_fatal = False
-        for pattern in _FATAL_PATTERNS:
-            if pattern.search(line):
-                is_fatal = True
-                if in_window:
-                    result["fatal_error_count"] += 1
-                    # Redact before storing: these fields are published to a public
-                    # feed and raw RMS lines can carry IPs / device-URL credentials.
-                    if "Traceback" in line:
-                        result["last_error"] = redact(_extract_traceback(lines, idx))
-                    else:
-                        result["last_error"] = redact(line.strip())[:300]
-                break
+        is_fatal = _fatal_match(line) is not None
+        if is_fatal and in_window:
+            result["fatal_error_count"] += 1
+            # Redact before storing: these fields are published to a public
+            # feed and raw RMS lines can carry IPs / device-URL credentials.
+            if "Traceback" in line:
+                result["last_error"] = redact(_extract_traceback(lines, idx))
+            else:
+                result["last_error"] = redact(line.strip())[:300]
 
         # WARNING-level lines that are neither fatal nor a known-benign pattern.
         if (in_window and not is_fatal and _WARNING_RE.search(line)
@@ -940,14 +971,14 @@ def collect_journal_fatal(station, main_pid):
         return {}
     count, last = 0, None
     for idx, line in enumerate(lines):
-        for pattern in _FATAL_PATTERNS:
-            if pattern.search(line):
-                count += 1
-                if "Traceback" in line:
-                    last = redact(_extract_traceback(lines, idx))
-                else:
-                    last = redact(line.strip())[:300]
-                break
+        # Journal lines carry no RMS level field, so loader diagnostics are never
+        # demoted here -- this is exactly the import-crash case they exist for.
+        if _fatal_match(line) is not None:
+            count += 1
+            if "Traceback" in line:
+                last = redact(_extract_traceback(lines, idx))
+            else:
+                last = redact(line.strip())[:300]
     if not count:
         return {}
     return {"fatal_error_count": count, "last_error": last,
