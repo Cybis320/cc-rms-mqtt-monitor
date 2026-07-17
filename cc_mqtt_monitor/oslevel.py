@@ -9,6 +9,7 @@ fields are simply null and a note is set, rather than failing.
 import os
 import re
 import time
+import calendar
 import subprocess
 
 from .sanitize import redact
@@ -98,14 +99,40 @@ def _kernel_log_lines(max_lines):
     return [], "kernel log not readable (need adm/systemd-journal group or root)"
 
 
+def _kloc_age_s(line, now=None):
+    """Age in seconds of a kernel-log line, from its journalctl short-iso
+    ("2026-07-16T18:23:45+0000 ...") or dmesg -T ("[Wed Jul 16 18:23:45 2026] ...")
+    timestamp. None if unparseable. Lets the OOM signal age out so a host that OOM'd
+    hours ago but has since recovered stops flagging while the kill line is still in
+    the (fixed-size) kernel-log window."""
+    now = time.time() if now is None else now
+    m = re.match(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})([+-])(\d{2}):?(\d{2})", line)  # journalctl short-iso
+    if m:
+        try:
+            base = calendar.timegm(time.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S"))
+            off = (int(m.group(3)) * 3600 + int(m.group(4)) * 60) * (1 if m.group(2) == "+" else -1)
+            return now - (base - off)
+        except (ValueError, OverflowError):
+            pass
+    m = re.match(r"\[([A-Z][a-z]{2} [A-Z][a-z]{2}\s+\d+ \d{2}:\d{2}:\d{2} \d{4})\]", line)  # dmesg -T (local time)
+    if m:
+        try:
+            return now - time.mktime(time.strptime(m.group(1), "%a %b %d %H:%M:%S %Y"))
+        except (ValueError, OverflowError):
+            pass
+    return None
+
+
 def scan_oom(max_lines=1500, lines=None, note=None):
-    """Count OOM-kill events in the recent kernel log and return the last victim.
+    """Count OOM-kill events in the recent kernel log and return the last victim
+    and how long ago the most recent kill was (`oom_last_age_s`, for aging the alert).
     `lines`/`note` may be passed in to share one kernel-log read with other
     scanners (e.g. scan_disk_errors); otherwise the log is read here."""
     result = {
         "oom_kill_count": 0,
         "last_oom_victim": None,
         "last_oom_line": None,
+        "oom_last_age_s": None,
         "oom_note": None,
     }
     if lines is None:
@@ -123,6 +150,10 @@ def scan_oom(max_lines=1500, lines=None, note=None):
             result["last_oom_victim"] = victim
             # Published to the public feed -> redact IPs/paths from the raw line.
             result["last_oom_line"] = redact(line.strip())[:300]
+            # lines are chronological, so the last match's age is the most recent kill
+            age = _kloc_age_s(line)
+            if age is not None:
+                result["oom_last_age_s"] = age
     return result
 
 

@@ -105,6 +105,13 @@ class Thresholds:
     # warn ABOVE (onset); sustained `full avg60` % to error ABOVE (OOM risk).
     mem_psi_full_avg10_warn: float = 10.0
     mem_psi_full_avg60_error: float = 10.0
+    # An OOM-kill is counted from a fixed-size kernel-log window, so a kill that
+    # happened once keeps being counted (and the host keeps flagging "oom") long
+    # after memory recovered -- until the line scrolls out (can be days) or reboot.
+    # Only flag OOM if the most recent kill is within this age, so the alert self-
+    # clears once the episode is over (each NEW kill refreshes the age). If the log
+    # timestamp can't be parsed (oom_last_age_s is None) we still flag, to be safe.
+    oom_recent_s: int = 21600           # 6 h
 
     # --- Dropped-frame attribution (classify_drops) ----------------------
     # These set when a signal is "hot" for the elimination logic that pins a
