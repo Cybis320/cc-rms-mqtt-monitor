@@ -482,8 +482,13 @@ def evaluate_host(metrics, thresholds, disabled=()):
     flag, state = _flagger(disabled)
 
     # OOM-killer activity is always significant; killing a python (RMS) process
-    # is treated as an error, anything else as degraded.
-    if metrics.get("oom_kill_count"):
+    # is treated as an error, anything else as degraded. But oom_kill_count comes
+    # from a fixed-size kernel-log window, so a single past kill keeps flagging for
+    # days after memory recovered -- gate on recency so the alert self-clears once
+    # the episode is over (a new kill refreshes oom_last_age_s). Unparseable age
+    # (None) still flags, to be safe.
+    oom_age = metrics.get("oom_last_age_s")
+    if metrics.get("oom_kill_count") and (oom_age is None or oom_age <= thresholds.oom_recent_s):
         victim = metrics.get("last_oom_victim") or "?"
         level = ERROR if "python" in str(victim).lower() else DEGRADED
         flag(level, "oom", "OOM-killer fired %dx (last victim: %s)"
