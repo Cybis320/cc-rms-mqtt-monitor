@@ -51,6 +51,20 @@ Distinguish the two `health` shapes by payload:
   `ExtractStars`' cap, so RMS skipped extraction and logged `Detected stars: 0` —
   the field was too *rich* to count, not empty, so we send `">800"` rather than a
   misleading `0`. Display it verbatim; for numeric use, treat `">N"` as ≥ N.
+- `processing_active` (bool|null) — a night-folder post-processing run is
+  underway inside StartCapture: either the **dawn** run (detection finishing,
+  astrometric recalibration, archiving, timelapse) right after night capture
+  ends, or the **startup reprocess** of a folder a crash left partially
+  processed. Derived from RMS's own log markers, and forced `false` when the
+  capture process is not alive (a mid-processing crash can't stay "processing").
+  `null` = log unreadable. Intended for a dashboard "processing" badge — during
+  this window the station is busy and day frames/FF output may legitimately lag.
+  With, while active:
+  - `processing_kind` — `dawn` | `reprocess` (else `null`)
+  - `processing_dir` — the night folder being processed (basename, e.g.
+    `US005A_20260718_062303_103793`)
+  - `processing_age_s` (float|null) — seconds since the run's start marker (dawn
+    runs can take well over an hour on a loaded host)
 - `rms_mode` — RMS's **actual** day/night capture mode: `day` | `night` | `null`
   (unknown — no recent watchdog line, e.g. capture down). Ground truth from RMS's
   in-process `daytime_mode` flag, not the sun. Informational, for the dashboard.

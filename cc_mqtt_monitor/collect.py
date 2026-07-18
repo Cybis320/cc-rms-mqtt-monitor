@@ -608,6 +608,34 @@ _METEOR_RE = re.compile(r"detected meteors:\s*(\d+)")
 # the most recent value as a live limiting-magnitude / cloud proxy. 0 by day.
 _STARS_RE = re.compile(r"Detected stars:\s*(\d+)")
 
+# Night-folder post-processing episodes. Two kinds, both inside StartCapture:
+#   dawn      -- the detection/calibration/archiving run right after night
+#                capture ends ("Finishing up the detection..." et al.)
+#   reprocess -- processIncompleteCaptures() at startup, re-running folders a
+#                crash left partially processed ("Found partially-processed
+#                data in <dir>").
+# A start marker opens an episode; an end marker closes it (the reprocess loop's
+# own success/error lines, or any line showing RMS moved on to waiting for /
+# running the next capture session). The last unclosed start in the log means
+# processing is underway right now.
+_PROC_DAWN_START_RE = re.compile(
+    r"Finishing up the detection|No detection queued|Waiting for the detection to finish")
+_PROC_REPROCESS_START_RE = re.compile(r"Found partially-processed data in\s+(\S+)")
+_PROC_END_RE = re.compile(
+    r"reprocessed with success!"
+    r"|An error occurred when trying to reprocess"
+    r"|Next start time:"
+    r"|Waiting .+ to start recording"
+    r"|Starting continuous capture now"
+    r"|Trying to reboot after processing"
+    r"|Capturing in (?:daytime|nighttime) mode"
+    r"|Starting a slideshow"
+    r"|Program start")
+# The capture dir the current/most recent session wrote into -- the folder a dawn
+# processing run works on. Also matches "New data directory: ..." (continuous
+# mode logs that form at each session rollover).
+_DATA_DIR_RE = re.compile(r"Data directory: (\S+)")
+
 # Benign, high-volume RMS warnings ignored by default: computational artifacts
 # or self-recovering races, not operational problems. Operators add more via
 # config `log_warning_ignore` (these defaults always apply).
@@ -985,7 +1013,7 @@ def collect_journal_fatal(station, main_pid):
             "fatal_source": "journal"}
 
 
-def collect_capture_events(station):
+def collect_capture_events(station, now=None):
     """Capture-stability counts for the CURRENT day/night session.
 
     Streams the whole current log (the buffer/dropped tail in collect_logs is too
@@ -1012,21 +1040,55 @@ def collect_capture_events(station):
                                    must be read from the whole log, not a short tail
                                    (else it's lost hours into a session -- e.g. a
                                    long day run -- and backend_fallback can't fire).
+      processing_active         -- a night-folder post-processing run (dawn
+                                   detection/calibration/archiving, or the startup
+                                   reprocess of a partially-processed folder) is
+                                   underway: the log's last processing start marker
+                                   has no matching end marker. With:
+      processing_kind           -- "dawn" | "reprocess" (null when not processing)
+      processing_dir            -- night folder being processed (basename)
+      processing_age_s          -- seconds since the run's start marker
     All null if the log can't be read. O(1) memory (line-streamed).
     """
     result = {"disconnects_session": None, "watchdog_restarts_session": None,
               "meteors_session": None, "stars_recent": None,
-              "capture_backend": None}
+              "capture_backend": None, "processing_active": None,
+              "processing_kind": None, "processing_dir": None,
+              "processing_age_s": None}
     log_path = _newest_log(station)
     if not log_path:
         return result
+    now = now or time.time()
     disc, wd, met, stars, backend = 0, 0, 0, None, None
     overflow_cap = None   # set by an overflow line; consumed by the next star line
+    proc_kind, proc_dir, proc_ts = None, None, None
+    data_dir = None       # last session dir logged; the dawn run processes it
     try:
         with open(log_path, errors="replace") as fh:
             for line in fh:
                 if _TRANSITION_RE.search(line):
                     disc, wd, met = 0, 0, 0      # new session -> reset (as RMS does)
+                    continue
+                # Post-processing episode boundaries. End first: a line can't be
+                # both, and the reprocess error line contains "reprocess" too.
+                if _PROC_END_RE.search(line):
+                    proc_kind, proc_dir, proc_ts = None, None, None
+                    continue
+                m = _PROC_REPROCESS_START_RE.search(line)
+                if m:
+                    proc_kind = "reprocess"
+                    proc_dir = os.path.basename(m.group(1).rstrip("/"))
+                    proc_ts = _parse_log_ts(line)
+                    continue
+                if _PROC_DAWN_START_RE.search(line):
+                    if proc_kind != "dawn":      # keep the FIRST marker's timestamp
+                        proc_kind = "dawn"
+                        proc_dir = data_dir
+                        proc_ts = _parse_log_ts(line)
+                    continue
+                m = _DATA_DIR_RE.search(line)
+                if m:
+                    data_dir = os.path.basename(m.group(1).rstrip("/"))
                     continue
                 # Actual backend: last init marker wins (a gst->cv2 fallback logs
                 # the gst attempt then the OpenCV init, so cv2 ends last).
@@ -1065,6 +1127,11 @@ def collect_capture_events(station):
     result["meteors_session"] = met
     result["stars_recent"] = stars
     result["capture_backend"] = backend
+    result["processing_active"] = proc_kind is not None
+    result["processing_kind"] = proc_kind
+    result["processing_dir"] = proc_dir
+    if proc_ts is not None:
+        result["processing_age_s"] = round(max(0.0, now - proc_ts), 1)
     return result
 
 
@@ -1446,7 +1513,15 @@ def collect_station(station, max_log_lines, now=None, warning_ignore=None,
     # root cause reaches last_error / log_fatal instead of only a downstream stall.
     if not metrics.get("fatal_error_count"):
         metrics.update(collect_journal_fatal(station, metrics.get("main_pid")))
-    metrics.update(collect_capture_events(station))
+    metrics.update(collect_capture_events(station, now))
+    # Processing runs INSIDE the StartCapture process: a crash mid-processing
+    # leaves the log ending "in processing" forever, so no live process means the
+    # run is over (its unfinished folder will surface as a startup reprocess).
+    if metrics.get("processing_active") and not metrics.get("capture_alive"):
+        metrics["processing_active"] = False
+        metrics["processing_kind"] = None
+        metrics["processing_dir"] = None
+        metrics["processing_age_s"] = None
     metrics.update(collect_summary(station))
     metrics.update(collect_upload(station, now))
     metrics.update(collect_disk(station))
