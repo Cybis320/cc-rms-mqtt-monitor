@@ -117,7 +117,13 @@ thresholds:
   upload_queue_warn: 10        # queue is normally 0 (drains each morning);
                                # ~4 files/camera/night accumulate when uploads fail
   clock_error_warn_ms: 100
-  dropped_frames_warn: 10      # dropped frames per 10 min before warning
+  # Drop alerting = a UNIVERSAL per-night rate standard (frame-rate-normalized).
+  dropped_frame_rate_warn_pct: 3.0   # alert once/night if the night's drop rate exceeds this %
+  dropped_frames_catastrophic: 3000  # live guard: severe frame loss in 10 min pages immediately
+  # NOTE: dropped_frames_warn is NO LONGER an alert threshold (the per-cycle raw-count
+  # alert fired on the normal blip every station has). It's only the floor for drop-cause
+  # ATTRIBUTION now. Set the two knobs above to tune drop alerting.
+  dropped_frames_warn: 10      # attribution floor only (not an alert)
   # Memory pressure (PSI) -- the pre-OOM signal, scale-independent (% stall, same
   # on a 2 GB Pi and a 32 GB box), so no per-host RAM tuning. degraded when the
   # 10s full-stall % spikes; error when the 60s full-stall % stays high (OOM near).

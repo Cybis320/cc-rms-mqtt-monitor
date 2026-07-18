@@ -91,8 +91,23 @@ class Thresholds:
     # WARNING-level log lines in the scanned tail before flagging (degraded).
     # RMS warnings are rare (~a few per multi-hour log), so 1 = alert on any.
     log_warning_warn: int = 1
-    # Dropped frames in the last 10 min before warning (a few are normal).
+    # Dropped frames in the last 10 min. NOTE this is no longer an ALERT threshold
+    # (it fired on the normal occasional blip that essentially every station has --
+    # ~62 drop alerts/day of mostly-noise). It's kept only as the floor for drop-
+    # cause ATTRIBUTION (classify_drops): below it, don't bother explaining a blip.
     dropped_frames_warn: int = 10
+    # Drop alerting is a UNIVERSAL quality standard on RMS's per-night
+    # dropped_frame_rate (%, from observation_summary.json) -- frame-rate-normalized,
+    # so one number means the same on any station. A healthy station drops well
+    # under this over a whole night; alert once/night above it (also feeds the
+    # weekly operator digest). Measured fleet distribution: ~60% of stations < 0.5%,
+    # a moderate 1-3% cluster, and a bad tail (some 20-54%).
+    dropped_frame_rate_warn_pct: float = 3.0
+    # Catastrophic LIVE guard: a stream dumping frames RIGHT NOW (mid-night camera/
+    # link failure) still pages immediately, before the nightly summary. Raw count
+    # over 10 min because the monitor has no fps to compute a live % -- 3000/10min is
+    # ~20% at the common 25 fps and unambiguously catastrophic at any lower rate.
+    dropped_frames_catastrophic: int = 3000
     # UDP receive-buffer overflow rate (RcvbufErrors/min, host-wide) to warn
     # ABOVE. Only evaluated when a station uses protocol: udp; alerts on the
     # growth RATE (the raw counter only climbs / resets at boot), not the total.
