@@ -38,7 +38,8 @@ CHECK_KEYS = (
     "upload_backlog",     # upload queue length over threshold
     "clock_unsynced",     # last summary reported clock not synchronized
     "clock_uncertainty",  # last summary clock error over threshold
-    "dropped_frames",     # dropped frames in the last 10 min
+    "dropped_frames",     # per-night dropped_frame_rate over the universal threshold
+    "dropped_frames_live",  # catastrophic LIVE frame loss (mid-night stream failure)
     "oom",                # host OOM-killer fired
     "mem_pressure",       # host memory pressure (PSI) -- the pre-OOM signal
     "udp_rcvbuf_errors",  # host UDP receive-buffer overflows climbing (udp RTSP)
@@ -462,17 +463,35 @@ def evaluate(metrics, thresholds, disabled=()):
         except (TypeError, ValueError):
             pass
 
-    # --- Dropped frames (a few are normal; warn only past the threshold) -
-    # The attribution (drop_cause/-detail) is computed in build_state and merged
-    # into metrics, so the alert says *why*, not just that frames dropped.
-    dropped = metrics.get("dropped_frames_10min") or 0
-    if dropped >= thresholds.dropped_frames_warn:
-        msg = "Dropped %d frames in last 10 min" % dropped
+    # --- Dropped frames --------------------------------------------------
+    # UNIVERSAL standard on RMS's per-night dropped_frame_rate (%): essentially
+    # every station drops the odd frame (a normal blip), so the old per-cycle
+    # raw-count alert (dropped_frames_10min >= 10) was ~62 alerts/day of mostly
+    # noise. Instead alert once/night when the whole night's drop rate exceeds the
+    # threshold -- the actionable "this station's stream was degraded" signal, which
+    # also feeds the weekly operator digest. drop_cause (from build_state) says *why*.
+    summary = metrics.get("summary") or {}
+    try:
+        rate = float(summary.get("dropped_frame_rate"))
+    except (TypeError, ValueError):
+        rate = None
+    if rate is not None and rate > thresholds.dropped_frame_rate_warn_pct:
         cause = metrics.get("drop_cause")
+        why = (" -- likely %s" % cause) if cause else ""
+        flag(DEGRADED, "dropped_frames",
+             "Dropped %.1f%% of frames last night (over %g%%)%s"
+             % (rate, thresholds.dropped_frame_rate_warn_pct, why))
+
+    # Catastrophic LIVE guard: a stream dumping frames right now (mid-night failure)
+    # pages immediately, without waiting for the nightly summary.
+    dropped = metrics.get("dropped_frames_10min") or 0
+    if dropped >= thresholds.dropped_frames_catastrophic:
+        cause = metrics.get("drop_cause")
+        detail = metrics.get("drop_detail")
+        msg = "Severe live frame loss: %d frames dropped in last 10 min" % dropped
         if cause:
-            detail = metrics.get("drop_detail")
             msg += " -- likely %s%s" % (cause, (" (%s)" % detail) if detail else "")
-        flag(DEGRADED, "dropped_frames", msg)
+        flag(ERROR, "dropped_frames_live", msg)
 
     return state["status"], state["problems"]
 
