@@ -651,6 +651,14 @@ _DEFAULT_WARNING_IGNORE = [
     # session: RMS returns before writing any json/mp4, so timelapse_missing won't fire either
     r"too many sporadics per hour",                            # Flux QC: skips a too-noisy
     # directory for the meteor-rate calc -- a science-pipeline decision, not station health
+    # TRANSIENT UploadManager warnings: RMS retries and self-heals, and a GENUINELY
+    # persistent upload failure backs the queue up so the upload_backlog check fires with
+    # the real "N files queued" count. So these transient/network blips are pure noise
+    # (~90/117 upload alerts in a sample week). NOTE we deliberately DON'T ignore the
+    # persistent CONFIG errors ("Agent authentication failed", "expected OPENSSH key",
+    # "IO error with key file") -- those are specifically actionable and stay as alerts.
+    r"UploadManager.*Uploading failed! Retry",                 # per-retry churn (Retry N of N)
+    r"UploadManager.*SSH connection failed during agent fallback",  # DNS / port / net blip
 ]
 
 
