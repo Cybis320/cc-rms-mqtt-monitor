@@ -500,18 +500,31 @@ def evaluate_host(metrics, thresholds, disabled=()):
     """Return (status, problems) for host-wide OS metrics (memory, OOM)."""
     flag, state = _flagger(disabled)
 
-    # OOM-killer activity is always significant; killing a python (RMS) process
-    # is treated as an error, anything else as degraded. But oom_kill_count comes
-    # from a fixed-size kernel-log window, so a single past kill keeps flagging for
-    # days after memory recovered -- gate on recency so the alert self-clears once
-    # the episode is over (a new kill refreshes oom_last_age_s). Unparseable age
-    # (None) still flags, to be safe.
+    # OOM handling, tied to the only thing that PROVES post-OOM recovery: a REBOOT.
+    # oom_kill_count is counted PER BOOT (from `journalctl -k`, current boot; verified
+    # against uptime on live hosts), so it means "OOM'd since the last boot and NOT
+    # rebooted since". Restarting capture does NOT clear it -- and shouldn't: an OOM can
+    # leave capture "up" but DEGRADED (a half-killed process capture_down won't catch),
+    # so only a reboot proves the box is clean. Three tiers:
+    #   * rebooted since the kill (oom_last_age_s > uptime) -> box is fresh -> CLEAR.
+    #   * kill is fresh (<= oom_recent_s) -> active crisis -> ERROR (python) / degraded.
+    #   * kill older but still this boot -> DEGRADED "reboot to recover" advisory that
+    #     persists until the box is actually rebooted (capture may be up yet degraded).
+    # Unparseable age/uptime -> flag, to be safe.
+    oom_n = metrics.get("oom_kill_count")
     oom_age = metrics.get("oom_last_age_s")
-    if metrics.get("oom_kill_count") and (oom_age is None or oom_age <= thresholds.oom_recent_s):
-        victim = metrics.get("last_oom_victim") or "?"
-        level = ERROR if "python" in str(victim).lower() else DEGRADED
-        flag(level, "oom", "OOM-killer fired %dx (last victim: %s)"
-             % (metrics["oom_kill_count"], victim))
+    uptime = metrics.get("uptime_s")
+    if oom_n:
+        rebooted = (oom_age is not None and uptime is not None and oom_age > uptime + 60)
+        if not rebooted:
+            victim = metrics.get("last_oom_victim") or "?"
+            if oom_age is None or oom_age <= thresholds.oom_recent_s:
+                level = ERROR if "python" in str(victim).lower() else DEGRADED
+                flag(level, "oom", "OOM-killer fired %dx (last victim: %s)" % (oom_n, victim))
+            else:
+                flag(DEGRADED, "oom",
+                     "OOM-killer fired %dx since boot (last victim: %s) -- capture may be up but "
+                     "degraded; reboot to fully recover" % (oom_n, victim))
 
     # Memory pressure (PSI) -- the actual pre-OOM signal. The kernel OOM-killer
     # fires on allocation-failure-after-reclaim, not at a fixed free-MB line, so

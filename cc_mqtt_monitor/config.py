@@ -120,18 +120,12 @@ class Thresholds:
     # warn ABOVE (onset); sustained `full avg60` % to error ABOVE (OOM risk).
     mem_psi_full_avg10_warn: float = 10.0
     mem_psi_full_avg60_error: float = 10.0
-    # OOM is an EVENT, not a state: the kill's lasting damage is that a process died,
-    # and THAT is carried by its own live checks -- if the OOM-killed capture stayed
-    # down, capture_down/capture_stalled flag it with the accurate current reason; if
-    # capture recovered, nothing flags. So the OOM warning only needs to be a brief
-    # "this just happened", not a sustained status. Flag it only while the most recent
-    # kill is within this (short) window; after that an otherwise-healthy host means it
-    # recovered -> clear. Composed with the capture checks this gives "old OOM + healthy
-    # host = recovered (cleared); old OOM + still-broken = flagged by the REAL problem".
-    # A new kill refreshes the window (an actively-thrashing box stays flagged). Also
-    # note oom_kill_count is counted from a fixed kernel-log window and only resets on
-    # REBOOT (restarting capture does NOT clear it), which is why the age-gate matters.
-    # Unparseable log timestamp (oom_last_age_s None) still flags, to be safe.
+    # OOM severity gradient (see evaluate_host): an OOM within this window is a FRESH
+    # crisis (error for a python/RMS victim); older-but-still-this-boot downgrades to a
+    # DEGRADED "reboot to recover" advisory that persists until the box is actually
+    # rebooted. The CLEAR condition is a reboot (oom_last_age_s > uptime), NOT this timer
+    # -- because capture can be "up" yet degraded after an OOM, so only a reboot proves
+    # the box is clean. This value is just the error->advisory transition.
     oom_recent_s: int = 900             # 15 min
 
     # --- Dropped-frame attribution (classify_drops) ----------------------
