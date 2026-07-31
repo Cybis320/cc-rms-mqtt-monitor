@@ -95,9 +95,14 @@ enable_adaptive_probe: true
 # Extra WARNING-level log lines to NOT alert on (regex, matched against the
 # line). Added to the built-in benign defaults: ExtractStars "Too many candidate
 # stars", numpy/scipy *Warning:, the observation-summary lock race, alignPlatepar
-# non-convergence, and TRANSIENT UploadManager warnings (retry churn + SSH/DNS/network
-# blips -- a persistent upload failure is caught by the upload_backlog queue check
-# instead; the persistent key/auth CONFIG errors are NOT ignored). Example:
+# non-convergence, TRANSIENT UploadManager warnings (retry churn + SSH/DNS/network blips --
+# a persistent upload failure is caught by the upload_backlog queue check instead; the
+# key/auth CONFIG errors are NOT ignored), capture-teardown chatter at day<->night switches
+# (cap.release hung / RawFrameSaver busy / set_state timeout -- RMS's own recovery, and a
+# camera that really stopped is caught by capture_stalled), the WATCHDOG force-terminate
+# line (the dedicated watchdog check already reports it), science-pipeline decisions
+# (Flux / recalibration skipping a night), routine FFTalign rotation reports, and GLib
+# assertion noise. Example:
 #   log_warning_ignore: ["Local file not found"]
 log_warning_ignore: []
 
