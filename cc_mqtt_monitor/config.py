@@ -120,13 +120,13 @@ class Thresholds:
     # warn ABOVE (onset); sustained `full avg60` % to error ABOVE (OOM risk).
     mem_psi_full_avg10_warn: float = 10.0
     mem_psi_full_avg60_error: float = 10.0
-    # An OOM-kill is counted from a fixed-size kernel-log window, so a kill that
-    # happened once keeps being counted (and the host keeps flagging "oom") long
-    # after memory recovered -- until the line scrolls out (can be days) or reboot.
-    # Only flag OOM if the most recent kill is within this age, so the alert self-
-    # clears once the episode is over (each NEW kill refreshes the age). If the log
-    # timestamp can't be parsed (oom_last_age_s is None) we still flag, to be safe.
-    oom_recent_s: int = 21600           # 6 h
+    # OOM severity gradient (see evaluate_host): an OOM within this window is a FRESH
+    # crisis (error for a python/RMS victim); older-but-still-this-boot downgrades to a
+    # DEGRADED "reboot to recover" advisory that persists until the box is actually
+    # rebooted. The CLEAR condition is a reboot (oom_last_age_s > uptime), NOT this timer
+    # -- because capture can be "up" yet degraded after an OOM, so only a reboot proves
+    # the box is clean. This value is just the error->advisory transition.
+    oom_recent_s: int = 900             # 15 min
 
     # --- Dropped-frame attribution (classify_drops) ----------------------
     # These set when a signal is "hot" for the elimination logic that pins a
