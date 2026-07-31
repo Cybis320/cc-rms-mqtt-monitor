@@ -24,10 +24,21 @@ TRANSIENT = [
     "UploadManager-line:88 - SSH connection failed during agent fallback: [Errno None] Unable to connect to port 22 on 1.2.3.4",
     "UploadManager-line:88 - SSH connection failed during agent fallback: [Errno 101] Network is unreachable",
 ]
+# RMS reports plain NETWORK failures under a misleading "IO error with key file" label --
+# these are unreachability, not key problems, so they must be muted too (verified live: every
+# one was a transport error, queues still drained, upload_backlog never fired).
+TRANSIENT += [
+    "UploadManager-line:183 - IO error with key file: [Errno None] Unable to connect to port 22 on 1.2.3.4",
+    "UploadManager-line:183 - IO error with key file: [Errno 110] Connection timed out",
+    "UploadManager-line:183 - IO error with key file: [Errno 101] Network is unreachable",
+    "UploadManager-line:183 - IO error with key file: [Errno -3] Temporary failure in name resolution",
+]
 PERSISTENT = [
     "UploadManager-line:64 - Agent authentication failed. No valid authorized keys found.",
     "UploadManager-line:70 - SSH error with provided key: encountered RSA key, expected OPENSSH key",
-    "UploadManager-line:75 - IO error with key file: [Errno None] Unable to connect to port 22 on 1.2.3.4",
+    # a REAL key-file fault (not a transport error) must still alert
+    "UploadManager-line:75 - IO error with key file: [Errno 13] Permission denied: id_rsa",
+    "UploadManager-line:75 - IO error with key file: [Errno 2] No such file or directory: id_rsa",
 ]
 
 
