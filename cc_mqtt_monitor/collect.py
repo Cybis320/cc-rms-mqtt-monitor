@@ -654,12 +654,19 @@ _DEFAULT_WARNING_IGNORE = [
     # TRANSIENT UploadManager warnings: RMS retries and self-heals, and a GENUINELY
     # persistent upload failure backs the queue up so the upload_backlog check fires with
     # the real "N files queued" count. So these transient/network blips are pure noise
-    # (~90/117 upload alerts in a sample week). NOTE we deliberately DON'T ignore the
-    # persistent CONFIG errors ("Agent authentication failed", "expected OPENSSH key",
-    # "IO error with key file") -- those are specifically actionable and stay as alerts.
+    # (~90/117 upload alerts in a sample week).
     r"UploadManager.*Uploading failed! Retry",                 # per-retry churn (Retry N of N)
     r"UploadManager.*SSH connection failed during agent fallback",  # DNS / port / net blip
-
+    # Match on the PAYLOAD, not RMS's prefix: RMS reports plain network failures under
+    # misleading labels -- e.g. "IO error with key file: [Errno None] Unable to connect to
+    # port 22", which is unreachability, not a key problem. Verified on this fleet: every
+    # such warning was a network error, uploads still drained (queues ~0), and upload_backlog
+    # never fired in 14 days. Keyed on the transport error so any prefix is covered.
+    r"UploadManager.*(?:Unable to connect to port|Network is unreachable|Connection timed out"
+    r"|Temporary failure in name resolution|No route to host|Connection refused)",
+    # STILL ALERTED (genuinely actionable, not network): "Agent authentication failed",
+    # "expected OPENSSH key", and any key-file error that is NOT one of the transport
+    # failures above (permission denied, missing file, bad format).
     # --- Capture teardown chatter (BufferedCapture) -----------------------
     # RMS tears the GStreamer pipeline down at every day<->night switch and on each
     # reconnect. When a flaky camera stops answering, teardown times out and RMS says so --

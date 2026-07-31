@@ -18,20 +18,29 @@ from cc_mqtt_monitor.config import Thresholds            # noqa: E402
 T = Thresholds()
 
 
-def _oom(age_s, victim="python", count=6):
-    return {"oom_kill_count": count, "last_oom_victim": victim,
-            "oom_last_age_s": age_s, "mem_available_mb": 10000}
+def _oom(age_s, victim="python", count=6, uptime=1_000_000):
+    # uptime defaults large, so by default the OOM is "this boot" (age < uptime)
+    return {"oom_kill_count": count, "last_oom_victim": victim, "oom_last_age_s": age_s,
+            "uptime_s": uptime, "mem_available_mb": 10000}
 
 
-def test_recent_oom_flags():
-    status, problems = health.evaluate_host(_oom(60), T)      # 1 min ago
+def test_fresh_oom_is_error():
+    status, problems = health.evaluate_host(_oom(60), T)      # 1 min ago, python victim
     assert any("OOM-killer fired" in p for p in problems)
-    assert status == health.ERROR                             # python victim -> error
+    assert status == health.ERROR
 
 
-def test_stale_oom_self_clears():
-    # kill happened well past the window -> memory recovered, no new kill -> no flag
-    status, problems = health.evaluate_host(_oom(T.oom_recent_s + 3600), T)
+def test_old_this_boot_oom_is_degraded_reboot_advisory():
+    # OOM'd this boot but a while ago (past the fresh window) + NOT rebooted (age < uptime)
+    # -> persists as a DEGRADED "reboot to recover" advisory, NOT cleared.
+    status, problems = health.evaluate_host(_oom(T.oom_recent_s + 3600, uptime=1_000_000), T)
+    assert any("reboot to fully recover" in p for p in problems)
+    assert status == health.DEGRADED
+
+
+def test_rebooted_since_oom_clears():
+    # the kill PREDATES the current boot (age > uptime) -> box was rebooted -> clear.
+    status, problems = health.evaluate_host(_oom(50_000, uptime=1_000), T)
     assert not any("OOM" in p for p in problems)
 
 
@@ -39,6 +48,12 @@ def test_unparseable_age_still_flags():
     # if the kernel-log timestamp couldn't be parsed we must not go silent on a real OOM
     status, problems = health.evaluate_host(_oom(None), T)
     assert any("OOM-killer fired" in p for p in problems)
+
+
+def test_missing_uptime_still_flags_within_window():
+    # no uptime -> can't prove a reboot -> flag (fresh here)
+    m = _oom(60); m.pop("uptime_s")
+    assert any("OOM-killer fired" in p for p in health.evaluate_host(m, T)[1])
 
 
 def test_nonpython_victim_is_degraded():
