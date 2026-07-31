@@ -667,6 +667,39 @@ _DEFAULT_WARNING_IGNORE = [
     # STILL ALERTED (genuinely actionable, not network): "Agent authentication failed",
     # "expected OPENSSH key", and any key-file error that is NOT one of the transport
     # failures above (permission denied, missing file, bad format).
+    # --- Capture teardown chatter (BufferedCapture) -----------------------
+    # RMS tears the GStreamer pipeline down at every day<->night switch and on each
+    # reconnect. When a flaky camera stops answering, teardown times out and RMS says so --
+    # then drops the fd / kills the saver and carries on. That is the RECOVERY working, not
+    # a fault: a camera that really stopped delivering is already caught by capture_stalled
+    # / dropped_frames / camera_unreachable. 211 of 859 log warnings in a sample fortnight.
+    r"releaseResources: cap\.release\(\) hung",
+    r"releaseResources: set_state\(NULL\) did not return",
+    r"RawFrameSaver still busy\. Terminating",
+    # NOTE the GST "Could not write/read to resource" warnings are deliberately NOT muted --
+    # a write failure can mean the disk is going.
+
+    # --- Watchdog force-terminate line (DUPLICATE) -------------------------
+    # The dedicated `watchdog` check already reports this incident, from its own
+    # _WATCHDOG_RE scan which this filter does not touch, and with better context. The
+    # generic log_warning path was re-reporting the same event as a second problem string
+    # in the same alert (verified: all 75 watchdog alerts also carried this line).
+    r"WATCHDOG: Force terminating",
+
+    # --- Science-pipeline decisions, not station health --------------------
+    # Flux / recalibration choosing to skip a night's data says nothing about whether the
+    # station is capturing properly (same rationale as "too many sporadics per hour"
+    # above); a station that genuinely stopped producing usable data is caught by the
+    # capture and detection checks.
+    r"-WARNING-Flux-line:",
+    r"recalibrateSelectedFF: no FF files after filtering",
+    # FFTalign reporting the frame-to-frame rotation it solved and corrected -- routine
+    # nightly alignment bookkeeping. The harder "imreg_dft error: The scale correction is
+    # too high!" is NOT muted.
+    r"FFTalign.*Rotation: -?[\d.]+ deg, limit of",
+
+    # --- Third-party library noise ----------------------------------------
+    r"g_type_class_unref: assertion",                          # GLib teardown assertion
 ]
 
 
