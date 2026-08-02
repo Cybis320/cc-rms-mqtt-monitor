@@ -8,7 +8,7 @@ import logging
 from .config import reload_config
 
 from .discovery import discover_stations
-from .collect import (collect_station, collect_capture, rms_branch, rms_remote,
+from .collect import (collect_station, collect_process, rms_branch, rms_remote,
                       rms_repo_status)
 from .oslevel import collect_host, iface_for_ip
 from .health import build_state, build_host_state, output_stalled
@@ -199,8 +199,12 @@ def gather_host(config, maint=None):
         ages = []
         for s in stations:
             try:
-                age = collect_capture(s).get("capture_age_s")
-            except Exception:                      # never let this break host health
+                # collect_process (NOT collect_capture -- that one is session freshness and
+                # carries no process age) walks the capture process tree and returns the age
+                # of its main process.
+                age = collect_process(s).get("capture_age_s")
+            except Exception:
+                log.exception("capture age for %s failed", s.station_id)   # never silent
                 age = None
             if age is not None:
                 ages.append(age)
