@@ -18,10 +18,15 @@ from cc_mqtt_monitor.config import Thresholds            # noqa: E402
 T = Thresholds()
 
 
-def _oom(age_s, victim="python", count=6, uptime=1_000_000):
-    # uptime defaults large, so by default the OOM is "this boot" (age < uptime)
-    return {"oom_kill_count": count, "last_oom_victim": victim, "oom_last_age_s": age_s,
-            "uptime_s": uptime, "mem_available_mb": 10000}
+def _oom(age_s, victim="python", count=6, uptime=1_000_000, capture_age=None):
+    # uptime defaults large, so by default the OOM is "this boot" (age < uptime).
+    # capture_age None = capture has NOT restarted since (older than the OOM is implied
+    # by leaving it unset, which is the "still damaged" case).
+    m = {"oom_kill_count": count, "last_oom_victim": victim, "oom_last_age_s": age_s,
+         "uptime_s": uptime, "mem_available_mb": 10000}
+    if capture_age is not None:
+        m["capture_restart_age_s"] = capture_age
+    return m
 
 
 def test_fresh_oom_is_error():
@@ -30,12 +35,27 @@ def test_fresh_oom_is_error():
     assert status == health.ERROR
 
 
-def test_old_this_boot_oom_is_degraded_reboot_advisory():
-    # OOM'd this boot but a while ago (past the fresh window) + NOT rebooted (age < uptime)
-    # -> persists as a DEGRADED "reboot to recover" advisory, NOT cleared.
+def test_old_oom_without_a_capture_restart_still_advises():
+    # OOM'd this boot, past the fresh window, capture NOT restarted since -> still flagged.
     status, problems = health.evaluate_host(_oom(T.oom_recent_s + 3600, uptime=1_000_000), T)
-    assert any("reboot to fully recover" in p for p in problems)
+    assert any("has not restarted since" in p for p in problems)
     assert status == health.DEGRADED
+
+
+def test_capture_restart_since_the_oom_clears_it():
+    """The real case that exposed this: a host 17 d past an OOM cascade, NEVER rebooted
+    (35 d uptime), but capture restarted 6 d ago -> recovered, must not keep flagging."""
+    day = 86400
+    m = _oom(17 * day, uptime=35 * day, capture_age=6 * day)
+    status, problems = health.evaluate_host(m, T)
+    assert not any("OOM" in p for p in problems)
+
+
+def test_capture_older_than_the_oom_does_not_count_as_recovery():
+    # capture predates the kill -> it was never replaced -> keep advising
+    day = 86400
+    m = _oom(5 * day, uptime=35 * day, capture_age=20 * day)
+    assert any("has not restarted since" in p for p in health.evaluate_host(m, T)[1])
 
 
 def test_rebooted_since_oom_clears():

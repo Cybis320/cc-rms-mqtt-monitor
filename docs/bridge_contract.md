@@ -18,6 +18,12 @@ stations/+/status     retained "online" / "offline"  (host Last-Will)
 Distinguish the two `health` shapes by payload:
 - **station record** has `station_id` (+ `group`, `group_slug`, capture metrics).
 - **host record** has `station_ids` + `mem_available_mb`/`oom_kill_count` (no `station_id`).
+  OOM fields: `oom_kill_count` is counted for the CURRENT BOOT, `oom_last_age_s` is how long
+  ago the most recent kill was, and `capture_restart_age_s` (present only when there is an
+  OOM to judge) is the age of the most recently (re)started capture process on the host.
+  The OOM alert clears once capture has been restarted since the kill
+  (`capture_restart_age_s < oom_last_age_s`) or the box was rebooted -- a restart is enough,
+  a reboot is not required.
 
 ## 2. Payload fields you need
 
