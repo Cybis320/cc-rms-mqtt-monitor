@@ -8,7 +8,8 @@ import logging
 from .config import reload_config
 
 from .discovery import discover_stations
-from .collect import collect_station, rms_branch, rms_remote, rms_repo_status
+from .collect import (collect_station, collect_capture, rms_branch, rms_remote,
+                      rms_repo_status)
 from .oslevel import collect_host, iface_for_ip
 from .health import build_state, build_host_state, output_stalled
 from . import maintenance
@@ -189,6 +190,22 @@ def gather_host(config, maint=None):
     data_paths = {s.data_dir for s in stations if s.data_dir}
     metrics = collect_host(udp=udp, cam_interfaces=(cam_ifaces or None),
                            data_paths=data_paths)
+    # If this host has OOM-killed something, work out whether capture has been RESTARTED
+    # since -- that is what clears the damage; a full reboot is NOT required (verified in
+    # the field: a host 17 d past an OOM cascade, never rebooted, was healthy again after a
+    # capture restart 6 d earlier). Only computed when there IS an OOM to judge, so hosts
+    # that never OOM'd pay nothing for it.
+    if metrics.get("oom_kill_count"):
+        ages = []
+        for s in stations:
+            try:
+                age = collect_capture(s).get("capture_age_s")
+            except Exception:                      # never let this break host health
+                age = None
+            if age is not None:
+                ages.append(age)
+        if ages:
+            metrics["capture_restart_age_s"] = min(ages)   # most recently (re)started capture
     state = build_host_state(metrics, config.thresholds, config.host_name,
                              _iso(time.time()), disabled)
     # A host can span several groups; list the distinct ones plus its stations,

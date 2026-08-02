@@ -514,17 +514,24 @@ def evaluate_host(metrics, thresholds, disabled=()):
     oom_n = metrics.get("oom_kill_count")
     oom_age = metrics.get("oom_last_age_s")
     uptime = metrics.get("uptime_s")
+    cap_age = metrics.get("capture_restart_age_s")
     if oom_n:
+        # RECOVERED once the OOM-damaged capture process has been REPLACED. A capture
+        # restart is enough -- a full reboot is not required (verified in the field). A
+        # reboot also counts, since it restarts capture. Either way the surviving damage
+        # is gone; anything still wrong afterwards is a different problem and has its own
+        # check (the drop/stall/camera checks), so it must not be blamed on a stale OOM.
+        restarted = (oom_age is not None and cap_age is not None and cap_age < oom_age)
         rebooted = (oom_age is not None and uptime is not None and oom_age > uptime + 60)
-        if not rebooted:
+        if not (restarted or rebooted):
             victim = metrics.get("last_oom_victim") or "?"
             if oom_age is None or oom_age <= thresholds.oom_recent_s:
                 level = ERROR if "python" in str(victim).lower() else DEGRADED
                 flag(level, "oom", "OOM-killer fired %dx (last victim: %s)" % (oom_n, victim))
             else:
                 flag(DEGRADED, "oom",
-                     "OOM-killer fired %dx since boot (last victim: %s) -- capture may be up but "
-                     "degraded; reboot to fully recover" % (oom_n, victim))
+                     "OOM-killer fired %dx (last victim: %s) and capture has not restarted "
+                     "since -- restart capture (or reboot) to clear" % (oom_n, victim))
 
     # Memory pressure (PSI) -- the actual pre-OOM signal. The kernel OOM-killer
     # fires on allocation-failure-after-reclaim, not at a fixed free-MB line, so
