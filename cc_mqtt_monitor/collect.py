@@ -143,12 +143,19 @@ def collect_process(station):
     cmd_pids = {pid for pid, args, ppid, _ in procs
                 if any(_STARTCAPTURE_MARKER in a for a in args)
                 and _process_config_path(pid, args) == target}
-    # Main = a cmdline match whose parent isn't also a match (the tree root).
+    # Tree ROOTS = cmdline matches whose parent isn't also a match. There should be
+    # exactly ONE per station. Several independent failure chains end with an external
+    # supervisor respawning StartCapture with no already-running guard, leaving DUPLICATE
+    # instances that each carry a full capture tree (~700 MB) until the box OOMs. Collect
+    # them ALL: taking only the first (the old behaviour) reported one clone's memory as if
+    # it were the whole station, so 38 clones looked normal.
+    roots = [pid for pid, args, ppid, _ in procs if pid in cmd_pids and ppid not in cmd_pids]
+    # Main = the OLDEST root (the original instance), so capture_age_s keeps meaning "how
+    # long has this station been capturing" rather than "when did the newest clone spawn".
     main_pid = None
-    for pid, args, ppid, _ in procs:
-        if pid in cmd_pids and ppid not in cmd_pids:
-            main_pid = pid
-            break
+    if roots:
+        ages = {p: _proc_age_s(p) for p in roots}
+        main_pid = max(roots, key=lambda p: (ages.get(p) is not None, ages.get(p) or 0))
 
     # Count the WHOLE tree under main, not just cmdline matches: with the
     # multiprocessing 'forkserver' start method (py3.14 support) the workers are
@@ -159,7 +166,7 @@ def collect_process(station):
     for pid, args, ppid, vmrss_kb in procs:
         children.setdefault(ppid, []).append(pid)
         rss[pid] = vmrss_kb
-    tree, stack = set(), ([main_pid] if main_pid is not None else [])
+    tree, stack = set(), list(roots)     # union of EVERY instance's tree, not just main's
     while stack:
         p = stack.pop()
         if p in tree:
@@ -187,6 +194,9 @@ def collect_process(station):
     return {
         "capture_alive": bool(tree),
         "process_count": len(tree),
+        # >1 means duplicate StartCapture instances for this ONE camera -- always a fault,
+        # whatever chain produced it, and the thing that actually OOMs the box.
+        "capture_instances": len(roots),
         "main_pid": main_pid,
         # Age of the capture tree's main process. A staggered GRMSUpdater restart
         # (and RMS's own capture_wait_seconds pre-capture sleep) means the tail

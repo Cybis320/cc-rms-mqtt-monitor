@@ -23,6 +23,7 @@ _RANK = {OK: 0, DEGRADED: 1, ERROR: 2}
 CHECK_KEYS = (
     "camera_unreachable", # camera not pingable for a sustained window (root cause)
     "capture_down",       # capture process for the station not running
+    "capture_duplicate",  # more than one StartCapture instance for one camera
     "data_unreadable",    # process alive but data_dir not readable (perms/other user)
     "capture_stalled",    # no FF (night) / no frames (day) within the threshold
     "detection_stalled",  # capturing but no FTPdetectinfo/CALSTARS produced
@@ -302,6 +303,21 @@ def evaluate(metrics, thresholds, disabled=()):
         return state["status"], state["problems"]
 
     # --- Capture process -------------------------------------------------
+    # Duplicate StartCapture instances for a SINGLE camera. There is exactly one legitimate
+    # instance per station, so any extra is a fault no matter which chain produced it --
+    # several different failures end the same way: an external supervisor respawns
+    # StartCapture with no already-running guard, and the clones (a full capture tree each,
+    # ~700 MB) pile up until the OOM-killer takes the box down. Detecting the STATE rather
+    # than any one trigger catches all of those chains. Checked before the liveness bail-out
+    # below so it is reported even while the station still looks "up".
+    inst = metrics.get("capture_instances")
+    if isinstance(inst, int) and inst > 1:
+        rss = metrics.get("total_rss_mb")
+        flag(ERROR, "capture_duplicate",
+             "%d StartCapture instances running for this one camera%s -- they will keep "
+             "multiplying and exhaust memory; kill the extras and check what is respawning it"
+             % (inst, (" (%.0f MB total)" % rss) if rss else ""))
+
     if not metrics.get("capture_alive"):
         flag(ERROR, "capture_down", "Capture process not running")
         # Process down -> downstream freshness checks are moot.
