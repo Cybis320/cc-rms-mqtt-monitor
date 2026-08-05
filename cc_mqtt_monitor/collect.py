@@ -149,7 +149,18 @@ def collect_process(station):
     # instances that each carry a full capture tree (~700 MB) until the box OOMs. Collect
     # them ALL: taking only the first (the old behaviour) reported one clone's memory as if
     # it were the whole station, so 38 clones looked normal.
-    roots = [pid for pid, args, ppid, _ in procs if pid in cmd_pids and ppid not in cmd_pids]
+    # A process whose PARENT also carries the StartCapture marker is a worker of that
+    # instance, never an instance itself. Test parentage against the MARKER, not against
+    # cmd_pids: _process_config_path() reads /proc/<pid>/cwd and returns None if that read
+    # fails, so a transient failure on the MAIN process dropped it out of cmd_pids and
+    # instantly promoted all of its children to "roots" -- a live host reported 5 instances
+    # (= its 5 workers, whose summed RSS matched the alert) while genuinely running one.
+    # The marker test does not depend on the parent's cwd being readable. The launcher
+    # (`bash .../RMS_StartCapture.sh`) does NOT contain "RMS.StartCapture", so a genuine
+    # second instance started by it is still correctly counted as a root.
+    marker_pids = {pid for pid, args, _, _ in procs
+                   if any(_STARTCAPTURE_MARKER in a for a in args)}
+    roots = [pid for pid, args, ppid, _ in procs if pid in cmd_pids and ppid not in marker_pids]
     # Main = the OLDEST root (the original instance), so capture_age_s keeps meaning "how
     # long has this station been capturing" rather than "when did the newest clone spawn".
     main_pid = None
