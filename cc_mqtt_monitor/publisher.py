@@ -10,6 +10,7 @@ Topic layout (with default prefix):
 import copy
 import json
 import logging
+import os
 
 import paho.mqtt.client as mqtt
 
@@ -103,6 +104,7 @@ class Publisher:
         if self._winning_broker is not None:
             self._build_client(self._winning_broker)
             self._connect_to(self._winning_broker)
+            self.clear_renamed_host()
             return
 
         attempts = [self.config.broker]
@@ -114,6 +116,7 @@ class Publisher:
             self._build_client(b)
             try:
                 self._connect_to(b)
+                self.clear_renamed_host()
                 if i > 0:   # a fallback won -> remember it for the session
                     self._winning_broker = b
                     log.info("Connected via fallback %s; using it for this session",
@@ -125,6 +128,48 @@ class Publisher:
                 log.warning("Broker connect %s failed: %s; %s",
                             self._endpoint_label(b), exc, more)
         raise last_exc            # all endpoints failed -> caller retries/backs off
+
+    HOSTNAME_FILE = "/var/lib/cc-rms-monitor/last_host_name"
+
+    def clear_renamed_host(self):
+        """Tombstone the retained topics of the host name we used LAST time, if it changed.
+
+        Host records are retained, so renaming a host (new hostname, or an edited
+        host_name in config.yaml) leaves the OLD topic published forever with frozen
+        data. Consumers then see a host that has been "dead for weeks" while every one
+        of its cameras is happily reporting under the new name -- which is exactly how
+        one renamed host was misread as a 37-day outage. An empty retained payload is
+        the documented tombstone (the bridge already treats it as stop-tracking).
+
+        Runs on connect, so it covers a rename made any way at all -- reinstall,
+        config edit, or the machine's hostname changing under us.
+        """
+        path = os.environ.get("CC_HOSTNAME_FILE", self.HOSTNAME_FILE)
+        now = self.config.host_name
+        prev = None
+        try:
+            with open(path) as fh:
+                prev = fh.read().strip() or None
+        except (IOError, OSError):
+            pass
+        if prev and prev != now:
+            for leaf in ("health", "status"):
+                topic = "%s/%s/%s" % (self.config.topic_prefix, prev, leaf)
+                try:
+                    self.client.publish(topic, payload=b"", qos=1, retain=True)
+                    log.info("Host renamed %s -> %s; cleared stale retained %s", prev, now, topic)
+                except Exception:
+                    log.exception("could not clear retained topic %s", topic)
+        if prev != now:
+            try:
+                d = os.path.dirname(path)
+                if d:
+                    os.makedirs(d, exist_ok=True)
+                with open(path, "w") as fh:
+                    fh.write(now + "\n")
+            except (IOError, OSError):
+                log.warning("could not record host name at %s; a future rename will "
+                            "leave a stale retained record", path)
 
     def _state_topic(self, station_id):
         return "%s/%s/health" % (self.config.topic_prefix, station_id)
