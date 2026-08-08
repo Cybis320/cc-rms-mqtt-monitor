@@ -43,7 +43,15 @@ run_as git -C "$DIR" fetch --quiet origin "$BRANCH"
 
 # Fast-forward only: never clobber local commits / diverged history.
 if ! run_as git -C "$DIR" merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
-    blocked "diverged from origin/$BRANCH (local commits or dirty tree); auto-update skipped"
+    # Name the offending files. The usual cause is a TRACKED file edited in place -- the
+    # repo has several plausibly-named "config" files and only config.yaml is ignored:
+    #   config.yaml            <- gitignored, safe to edit (this is the one to edit)
+    #   config.example.yaml    <- TRACKED template; editing it blocks updates
+    #   cc_mqtt_monitor/config.py <- TRACKED source; editing it blocks updates
+    # Without the file list the operator has no way to know which, so say it explicitly.
+    dirty="$(run_as git -C "$DIR" status --porcelain 2>/dev/null | head -10 | tr '\n' ';')"
+    ahead="$(run_as git -C "$DIR" rev-list --count "origin/$BRANCH..HEAD" 2>/dev/null || echo '?')"
+    blocked "auto-update blocked: cannot fast-forward to origin/$BRANCH (local commits ahead: ${ahead}; modified: ${dirty:-none}). Edit config.yaml only -- config.example.yaml and cc_mqtt_monitor/config.py are tracked. Fix with: git -C $DIR checkout -- <file>  (or stash), then the next run recovers automatically."
 fi
 
 after="$(run_as git -C "$DIR" rev-parse HEAD)"
