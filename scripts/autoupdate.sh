@@ -18,6 +18,16 @@ RUN_USER="${CC_USER:-ops}"
 VENV="${CC_VENV:-/home/${RUN_USER}/vRMS}"
 SERVICE="${CC_SERVICE:-cc-rms-monitor}"
 BRANCH="${CC_BRANCH:-master}"
+# A blocked update used to exit 0 and print to a journal nobody reads, so a station could
+# sit on old code indefinitely with nothing to show for it. Record the reason where the
+# monitor can publish it, and exit non-zero so systemd marks the unit failed.
+MARKER="${CC_UPDATE_MARKER:-/var/lib/cc-rms-monitor/update_blocked}"
+mkdir -p "$(dirname "$MARKER")" 2>/dev/null || true
+blocked() {
+    printf '%s\n' "$1" > "$MARKER" 2>/dev/null || true
+    echo "$1" >&2
+    exit 1
+}
 
 # Run a command as the repo owner when we're root; otherwise run it directly.
 run_as() {
@@ -33,11 +43,12 @@ run_as git -C "$DIR" fetch --quiet origin "$BRANCH"
 
 # Fast-forward only: never clobber local commits / diverged history.
 if ! run_as git -C "$DIR" merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
-    echo "Local checkout has diverged from origin/$BRANCH; skipping auto-update."
-    exit 0
+    blocked "diverged from origin/$BRANCH (local commits or dirty tree); auto-update skipped"
 fi
 
 after="$(run_as git -C "$DIR" rev-parse HEAD)"
+
+rm -f "$MARKER" 2>/dev/null || true          # we fast-forwarded fine: not blocked
 
 if [ "$before" = "$after" ]; then
     echo "Already up to date ($after)."

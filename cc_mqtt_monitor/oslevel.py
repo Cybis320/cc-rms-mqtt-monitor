@@ -598,12 +598,45 @@ def collect_host(scan_oom_events=True, udp=False, cam_interfaces=None,
         metrics.update(scan_disk_errors(lines=klines, note=knote,
                                         data_paths=data_paths))
     metrics["uptime_s"] = _uptime()
+    metrics.update(monitor_version())
     metrics.update(collect_cpu_pressure())
     metrics.update(collect_nic_errors(cam_interfaces))
     if udp:
         metrics.update(collect_udp_errors())
         metrics.update(collect_ip_reasm())
     return metrics
+
+
+UPDATE_MARKER = os.environ.get("CC_UPDATE_MARKER", "/var/lib/cc-rms-monitor/update_blocked")
+
+
+def monitor_version():
+    """What code this station is actually running, and whether its auto-update is stuck.
+
+    A blocked auto-update used to be invisible: autoupdate.sh refused the fast-forward,
+    printed to the journal and exited 0, so the station sat on old code indefinitely while
+    looking healthy. Publishing both the commit and the block reason makes "this station is
+    behind" a thing the fleet can see instead of something you notice weeks later.
+    """
+    out = {"monitor_commit": None, "monitor_update_blocked": None}
+    try:
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        head = os.path.join(repo, ".git", "HEAD")
+        with open(head) as fh:
+            ref = fh.read().strip()
+        if ref.startswith("ref:"):
+            path = os.path.join(repo, ".git", ref.split(None, 1)[1])
+            with open(path) as fh:
+                ref = fh.read().strip()
+        out["monitor_commit"] = ref[:12] or None
+    except (IOError, OSError, IndexError):
+        pass
+    try:
+        with open(UPDATE_MARKER) as fh:
+            out["monitor_update_blocked"] = fh.read().strip()[:200] or None
+    except (IOError, OSError):
+        pass
+    return out
 
 
 def _uptime():

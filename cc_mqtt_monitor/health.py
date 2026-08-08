@@ -46,6 +46,7 @@ CHECK_KEYS = (
     "udp_rcvbuf_errors",  # host UDP receive-buffer overflows climbing (udp RTSP)
     "nic_errors",         # host NIC RX errors climbing (wire/link)
     "disk_errors",        # host kernel disk I/O errors / read-only remount
+    "update_blocked",     # the monitor's own auto-update is stuck on this host
 )
 
 
@@ -527,6 +528,14 @@ def evaluate_host(metrics, thresholds, disabled=()):
     #   * kill older but still this boot -> DEGRADED "reboot to recover" advisory that
     #     persists until the box is actually rebooted (capture may be up yet degraded).
     # Unparseable age/uptime -> flag, to be safe.
+    # The monitor's own auto-update is stuck, so this station is frozen on old code and
+    # will silently miss every future fix. Degraded, not error: capture is unaffected.
+    blocked = metrics.get("monitor_update_blocked")
+    if blocked:
+        flag(DEGRADED, "update_blocked",
+             "Monitor auto-update is blocked (%s) -- this station is stuck on old code"
+             % str(blocked)[:120])
+
     oom_n = metrics.get("oom_kill_count")
     oom_age = metrics.get("oom_last_age_s")
     uptime = metrics.get("uptime_s")
