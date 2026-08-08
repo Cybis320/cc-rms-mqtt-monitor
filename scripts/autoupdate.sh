@@ -31,6 +31,46 @@ MARKER="${CC_UPDATE_MARKER:-/var/lib/cc-rms-monitor/update_blocked}"
 # Opt OUT on a box with deliberate local changes (a dev machine):
 #   touch "$DIR/.no-autoupdate-force"      or set CC_UPDATE_FORCE=0
 FORCE="${CC_UPDATE_FORCE:-1}"
+# The systemd unit runs the INSTALLED copy of this script, deliberately outside the
+# checkout. Running it from inside the repo is self-stranding: if the repo ever cannot be
+# updated, neither can the updater, so a station stays broken forever with no operator to
+# rescue it -- exactly how one host sat frozen (and silent) for three weeks. Keeping the
+# executed copy out of the tree means a jammed repo can still be repaired by the updater.
+# The installed copy refreshes itself from the repo after each successful update, so fixes
+# to this script still propagate (one cycle later).
+SELF_INSTALLED="${CC_SELF:-/usr/local/lib/cc-rms-monitor/autoupdate.sh}"
+
+sync_self() {
+    src="$DIR/scripts/autoupdate.sh"
+    [ -f "$src" ] || return 0
+    cmp -s "$src" "$SELF_INSTALLED" 2>/dev/null && return 0
+    mkdir -p "$(dirname "$SELF_INSTALLED")" 2>/dev/null || return 0
+    tmp="$(mktemp "${SELF_INSTALLED}.XXXXXX" 2>/dev/null)" || return 0
+    # atomic replace: the running shell keeps reading the old inode, so overwriting the
+    # script mid-run is safe.
+    if cp "$src" "$tmp" && chmod 0755 "$tmp" && mv -f "$tmp" "$SELF_INSTALLED"; then
+        echo "Refreshed installed updater at $SELF_INSTALLED from the repo."
+    else
+        rm -f "$tmp" 2>/dev/null || true
+    fi
+}
+# Existing installs have a unit whose ExecStart points INTO the checkout. There is no
+# operator on these stations to repoint it, so the updater migrates the unit itself, once.
+migrate_unit() {
+    unit="/etc/systemd/system/${SERVICE}-update.service"
+    [ -f "$unit" ] && [ -w "$unit" ] || return 0            # absent, or we are not root
+    [ -x "$SELF_INSTALLED" ] || return 0                    # nothing to point at yet
+    grep -q "^ExecStart=${SELF_INSTALLED}\$" "$unit" && return 0          # already migrated
+    grep -q "^ExecStart=.*${DIR}" "$unit" || return 0                     # not the in-repo form
+    sed -i "s|^ExecStart=.*|ExecStart=${SELF_INSTALLED}|" "$unit" || return 0
+    grep -q "^Environment=CC_SELF=" "$unit" \
+        || sed -i "/^ExecStart=/i Environment=CC_SELF=${SELF_INSTALLED}" "$unit" || true
+    systemctl daemon-reload 2>/dev/null || true
+    echo "Migrated $unit to run the installed updater ($SELF_INSTALLED), out of the checkout."
+}
+
+on_exit() { sync_self; migrate_unit; }
+trap on_exit EXIT
 mkdir -p "$(dirname "$MARKER")" 2>/dev/null || true
 blocked() {
     printf '%s\n' "$1" > "$MARKER" 2>/dev/null || true

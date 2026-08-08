@@ -119,6 +119,9 @@ fi
 
 # --- 4. systemd service (hardened) ------------------------------------------
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+# The updater is installed OUTSIDE the checkout on purpose -- see the comment in
+# autoupdate.sh: a script that lives in the repo it updates cannot rescue that repo.
+UPDATER_PATH="${CC_UPDATER_PATH:-/usr/local/lib/cc-rms-monitor/autoupdate.sh}"
 render_unit() {
     cat <<EOF
 [Unit]
@@ -161,7 +164,11 @@ Environment=CC_USER=${RUN_USER}
 Environment=CC_VENV=${VENV}
 Environment=CC_SERVICE=${SERVICE_NAME}
 Environment=CC_BRANCH=${CC_BRANCH:-master}
-ExecStart=${DEST}/scripts/autoupdate.sh
+Environment=CC_SELF=${UPDATER_PATH}
+# Run the INSTALLED copy, outside the checkout: an updater that lives in the repo it
+# updates cannot rescue a repo that has become un-updatable (and these stations have no
+# operator to do it by hand). The script refreshes this copy after each successful update.
+ExecStart=${UPDATER_PATH}
 EOF
 }
 render_update_timer() {
@@ -194,6 +201,10 @@ if command -v systemctl >/dev/null 2>&1; then
 
     if [ "${CC_NO_AUTOUPDATE:-0}" != "1" ]; then
         info "Installing auto-update timer (${CC_UPDATE_INTERVAL:-15min})"
+        # Install the updater outside the checkout, and point the unit at that copy.
+        $SUDO mkdir -p "$(dirname "$UPDATER_PATH")" 2>/dev/null || true
+        $SUDO install -m 0755 "$DEST/scripts/autoupdate.sh" "$UPDATER_PATH" 2>/dev/null \
+            || warn "could not install updater to $UPDATER_PATH"
         render_update_service | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}-update.service" >/dev/null || true
         render_update_timer   | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}-update.timer"   >/dev/null || true
     fi
