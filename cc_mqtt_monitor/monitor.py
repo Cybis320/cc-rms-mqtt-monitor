@@ -352,6 +352,32 @@ def _connect_with_retry(config, publisher):
             backoff = min(backoff * 2, 60)
 
 
+def _publish_watchdog(config, publisher):
+    """Exit(1) when nothing has reached the broker for too long, so systemd restarts us.
+
+    Restart=always only catches a process that DIED. The failure this covers is worse
+    because it is invisible: the process runs, the socket stays established, paho keeps
+    answering keepalives -- and not one publish lands. A host sat like that for three
+    hours after a server outage, still capturing normally, while its dashboard card read
+    "offline" and no guard we had could tell. The measured signal is the last QoS-1
+    PUBACK, i.e. the broker ACCEPTING a message; being connected is not evidence.
+
+    Silence is normal before the first connection (initial backoff) and while the broker
+    is simply unreachable -- that is an outage, not a wedged agent -- so the clock only
+    runs once connected.
+    """
+    stale_after = float(os.environ.get(
+        "CC_PUBLISH_WATCHDOG_S", max(600, 10 * config.interval_seconds)))
+    age = publisher.seconds_since_publish()
+    if age is None or not publisher.is_connected():
+        return
+    if age > stale_after:
+        log.error("No publish confirmed in %.0fs (limit %.0fs) while connected -- the "
+                  "session is wedged; exiting so systemd restarts a clean one",
+                  age, stale_after)
+        raise SystemExit(1)
+
+
 def _config_mtime(path):
     """Modification time of the config file, or None (no file / unreadable)."""
     if not path:
@@ -420,11 +446,12 @@ def run_loop(config, publisher, config_path=None):
                     run_once(config, publisher)
                     for sid in opted_out:        # wipe any prior data, once each
                         if sid not in cleared:
-                            publisher.clear_station(sid)
-                            cleared.add(sid)
+                            if publisher.clear_station(sid):
+                                cleared.add(sid)   # only once it really went out
                     cleared &= set(opted_out)     # re-arm if a station re-consents
                 except Exception:  # never let one bad cycle kill the agent
                     log.exception("Error during monitor cycle")
+                _publish_watchdog(config, publisher)
             elif connected:
                 log.info("No station has weblog_enable=true; clearing retained "
                          "data and going silent")
