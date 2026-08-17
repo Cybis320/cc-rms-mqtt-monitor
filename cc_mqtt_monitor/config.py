@@ -11,15 +11,52 @@ settings can be overridden from the environment for convenience:
 """
 
 import binascii
+import hashlib
 import logging
 import os
 import socket
+import uuid
 from dataclasses import dataclass, field, asdict
 
 log = logging.getLogger("cc_mqtt_monitor")
 
 # Where the per-install identity suffix lives (see _instance_suffix).
 CLIENT_ID_FILE = "/var/lib/cc-rms-monitor/client_suffix"
+# Fallback state dir for an unprivileged service: the unit runs as User=ops and nothing
+# created /var/lib/cc-rms-monitor, so every write there failed. That was survivable for
+# a marker file but NOT for identity -- see _instance_suffix.
+USER_STATE_DIR = "~/.local/state/cc-rms-monitor"
+
+
+def state_paths(name, env_var=None):
+    """Candidate paths for a piece of monitor state, best first.
+
+    An explicit env override wins outright (tests, and a deliberate operator choice).
+    Otherwise try the system state dir, then a user-writable one -- because the service
+    is unprivileged and the system dir may not exist.
+    """
+    override = os.environ.get(env_var) if env_var else None
+    if override:
+        return [override]
+    return ["/var/lib/cc-rms-monitor/%s" % name,
+            os.path.join(os.path.expanduser(USER_STATE_DIR), name)]
+
+
+def _machine_suffix():
+    """A 6-hex-char id derived from this machine's MAC: unique per box, stable forever,
+    and needing no writable disk. Returns None when it cannot be trusted.
+
+    uuid.getnode() invents a RANDOM node id (flagged by the multicast bit) when it can't
+    read a real MAC -- which would be unstable across restarts, so reject it. Unlike
+    /etc/machine-id, a MAC is not shared by clones of a disk image.
+    """
+    try:
+        node = uuid.getnode()
+    except Exception:
+        return None
+    if node & (1 << 40):                     # multicast bit set -> randomly generated
+        return None
+    return hashlib.sha256(("cc-rms-monitor:%d" % node).encode("ascii")).hexdigest()[:6]
 
 
 def _instance_suffix():
@@ -33,34 +70,45 @@ def _instance_suffix():
       * the HOST topic -- so those same four machines all wrote one retained
         stations/raspberrypi/health, each overwriting the last. Only the newest
         writer was ever visible, hiding host-level disk/OOM/NIC/memory state for
-        the other three. One of them (BE000A) went quiet for ten hours, degraded
-        with a low disk, and nothing could show it.
+        the other three.
+
+    STABILITY MATTERS AS MUCH AS UNIQUENESS. A suffix that changes per run makes a new
+    host topic on every restart, and each abandoned one lingers as a retained record:
+    the first rollout of this added 28 orphans in 26 minutes, because the service runs
+    unprivileged and /var/lib/cc-rms-monitor did not exist, so the "persist it" step
+    silently failed and fell back to random. Hence: persisted value first, then a
+    MAC-derived value that needs no disk at all, and random only as a last resort.
 
     Deliberately NOT /etc/machine-id: the fleet is imaged from a common source, so
     clones share one (the same reason powered-off boxes show "online" in RustDesk).
-    A persisted random value is unique even among clones.
     """
-    path = os.environ.get("CC_CLIENT_ID_FILE", CLIENT_ID_FILE)
-    try:
-        with open(path) as fh:
-            got = fh.read().strip()
-        if got:
-            return got
-    except (IOError, OSError):
-        pass
-    suffix = binascii.hexlify(os.urandom(3)).decode("ascii")
-    try:
-        d = os.path.dirname(path)
-        if d:
-            os.makedirs(d, exist_ok=True)
-        with open(path, "w") as fh:
-            fh.write(suffix + "\n")
-    except (IOError, OSError):
-        # Read-only /var or no permission: still unique per process, which is what
-        # stops the eviction war and the record overwriting. It changes on restart,
-        # which the rename cleanup then tidies up.
-        log.warning("could not persist identity suffix at %s; using a per-run id", path)
+    paths = state_paths("client_suffix", "CC_CLIENT_ID_FILE")
+    for path in paths:
+        try:
+            with open(path) as fh:
+                got = fh.read().strip()
+            if got:
+                return got
+        except (IOError, OSError):
+            continue
+    suffix = _machine_suffix()
+    if suffix is None:
+        suffix = binascii.hexlify(os.urandom(3)).decode("ascii")
+        log.warning("no stable MAC for the instance id; using a random one. If it also "
+                    "cannot be persisted, each restart publishes under a NEW host topic.")
+    for path in paths:                       # pin it, so the id survives even if the MAC moves
+        try:
+            d = os.path.dirname(path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(suffix + "\n")
+            return suffix
+        except (IOError, OSError):
+            continue
+    log.warning("could not persist the instance id at any of %s", paths)
     return suffix
+
 
 try:
     import yaml

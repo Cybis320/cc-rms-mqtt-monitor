@@ -50,11 +50,20 @@ def test_uid_is_stable_across_repeated_post_init():
 
 
 def test_two_installs_sharing_a_host_name_differ():
-    _fresh_suffix_file()
-    a = cfgmod.Config(host_name="raspberrypi").host_uid
-    _fresh_suffix_file()
-    b = cfgmod.Config(host_name="raspberrypi").host_uid
-    assert a != b
+    """Identity is MAC-derived, so a second box means a different MAC, not just a
+    different state dir."""
+    import uuid as real_uuid
+
+    def uid_for(mac):
+        cfgmod.uuid = type("u", (), {"getnode": staticmethod(lambda: mac)})
+        _fresh_suffix_file()
+        try:
+            return cfgmod.Config(host_name="raspberrypi").host_uid
+        finally:
+            cfgmod.uuid = real_uuid
+
+    a, b = uid_for(0x001122334455), uid_for(0x66778899aabb)
+    assert a != b and a.startswith("raspberrypi-") and b.startswith("raspberrypi-")
 
 
 def test_load_config_applies_yaml_host_name_to_the_uid():

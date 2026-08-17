@@ -12,6 +12,11 @@ ExecStart=/home/ops/vRMS/bin/python -m cc_mqtt_monitor --config /home/ops/source
 Restart=always
 RestartSec=10
 
+# Creates /var/lib/cc-rms-monitor owned by User= above. Without it the dir never
+# existed and an unprivileged service could not persist its identity, so every
+# restart published under a NEW host topic and left the old one retained.
+StateDirectory=cc-rms-monitor
+
 # --- OOM protection -------------------------------------------------------
 # Make the monitor one of the LAST processes the kernel OOM-killer chooses, so
 # it survives to report the event that killed an RMS process. systemd applies

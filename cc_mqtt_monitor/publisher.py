@@ -21,7 +21,7 @@ import time
 
 import paho.mqtt.client as mqtt
 
-from .config import CLIENT_ID_FILE, _instance_suffix   # noqa: F401  (re-exported)
+from .config import CLIENT_ID_FILE, _instance_suffix, state_paths   # noqa: F401
 
 log = logging.getLogger("cc_mqtt_monitor")
 
@@ -212,14 +212,17 @@ class Publisher:
         Runs on connect, so it covers a rename made any way at all -- reinstall,
         config edit, or the machine's hostname changing under us.
         """
-        path = os.environ.get("CC_HOSTNAME_FILE", self.HOSTNAME_FILE)
+        paths = state_paths("last_host_name", "CC_HOSTNAME_FILE")
         now = self.config.host_uid
         prev = None
-        try:
-            with open(path) as fh:
-                prev = fh.read().strip() or None
-        except (IOError, OSError):
-            pass
+        for p in paths:
+            try:
+                with open(p) as fh:
+                    prev = fh.read().strip() or None
+            except (IOError, OSError):
+                continue
+            if prev:
+                break
         if prev and prev != now:
             for leaf in ("health", "status"):
                 topic = "%s/%s/%s" % (self.config.topic_prefix, prev, leaf)
@@ -229,15 +232,22 @@ class Publisher:
                 except Exception:
                     log.exception("could not clear retained topic %s", topic)
         if prev != now:
-            try:
-                d = os.path.dirname(path)
-                if d:
-                    os.makedirs(d, exist_ok=True)
-                with open(path, "w") as fh:
-                    fh.write(now + "\n")
-            except (IOError, OSError):
-                log.warning("could not record host name at %s; a future rename will "
-                            "leave a stale retained record", path)
+            for p in paths:
+                try:
+                    d = os.path.dirname(p)
+                    if d:
+                        os.makedirs(d, exist_ok=True)
+                    with open(p, "w") as fh:
+                        fh.write(now + "\n")
+                    break
+                except (IOError, OSError):
+                    continue
+            else:
+                # This is why the ProCamSFF14 orphan had to be cleared by hand: the
+                # service is unprivileged and the system state dir did not exist, so
+                # nothing was ever recorded and no rename was ever detected.
+                log.warning("could not record the host id at any of %s; a future rename "
+                            "will leave a stale retained record", paths)
 
     def _state_topic(self, station_id):
         return "%s/%s/health" % (self.config.topic_prefix, station_id)

@@ -32,6 +32,7 @@ if "paho" not in sys.modules:
     sys.modules["paho.mqtt.client"] = _client
 
 from cc_mqtt_monitor import publisher                       # noqa: E402
+from cc_mqtt_monitor import config as cfgmod                # noqa: E402
 
 
 def _fresh_suffix_file():
@@ -39,13 +40,28 @@ def _fresh_suffix_file():
     return os.environ["CC_CLIENT_ID_FILE"]
 
 
-def test_same_hostname_different_machines_get_different_ids():
-    """The raspberrypi case: identical hostname, two installs, ids must differ."""
+def _as_machine(mac):
+    """Pretend to be a different physical box. Identity is MAC-derived now, so a second
+    state dir alone no longer models a second machine -- the MAC has to differ too."""
+    import uuid as _uuid
+    cfgmod.uuid = type("u", (), {"getnode": staticmethod(lambda: mac)})
     _fresh_suffix_file()
-    a = publisher._instance_suffix()
-    _fresh_suffix_file()                       # a second machine = its own state dir
-    b = publisher._instance_suffix()
+    try:
+        return publisher._instance_suffix()
+    finally:
+        cfgmod.uuid = _uuid
+
+
+def test_same_hostname_different_machines_get_different_ids():
+    """The raspberrypi case: identical hostname, two boxes, ids must differ."""
+    a = _as_machine(0x001122334455)
+    b = _as_machine(0x66778899aabb)
     assert a != b, "two installs sharing a hostname would evict each other forever"
+
+
+def test_the_same_machine_always_derives_the_same_id():
+    """The other half: a restart must NOT invent a new identity (28 orphans came of it)."""
+    assert _as_machine(0x001122334455) == _as_machine(0x001122334455)
 
 
 def test_suffix_is_stable_across_restarts():
@@ -66,12 +82,18 @@ def test_suffix_is_persisted_and_reused_from_disk():
     assert publisher._instance_suffix() == "abc123"
 
 
-def test_unwritable_location_still_yields_a_unique_id():
-    """Read-only /var must not fall back to a shared/blank id -- that is the bug."""
+def test_unwritable_location_still_yields_a_STABLE_id():
+    """Stability matters as much as uniqueness, and this case got it wrong first time.
+
+    The service is unprivileged and /var/lib/cc-rms-monitor did not exist, so persisting
+    always failed and a per-run random id was handed out. Unique, yes -- and every
+    restart therefore published under a NEW host topic, leaving the old one retained:
+    28 orphaned host records appeared within 26 minutes of the rollout. With nowhere to
+    write, the id must still come out the same on every call."""
     os.environ["CC_CLIENT_ID_FILE"] = "/proc/cc-cannot-write-here/client_suffix"
     a = publisher._instance_suffix()
     b = publisher._instance_suffix()
-    assert a and b and a != b, "per-run ids are still unique, which is what matters"
+    assert a and a == b, "an unpersistable id must still be stable across restarts"
 
 
 def test_suffix_is_not_derived_from_machine_id():
@@ -83,6 +105,28 @@ def test_suffix_is_not_derived_from_machine_id():
         return                                  # nothing to collide with here
     _fresh_suffix_file()
     assert publisher._instance_suffix() not in (mid, mid[:6], mid[-6:])
+
+
+def test_state_paths_falls_back_to_a_user_writable_dir():
+    """The unprivileged service must have somewhere it can actually write."""
+    os.environ.pop("CC_CLIENT_ID_FILE", None)
+    paths = cfgmod.state_paths("client_suffix", "CC_CLIENT_ID_FILE")
+    assert paths[0].startswith("/var/lib/"), paths
+    assert len(paths) > 1 and paths[-1].startswith(os.path.expanduser("~")), paths
+
+
+def test_env_override_wins_outright():
+    os.environ["CC_CLIENT_ID_FILE"] = "/tmp/pinned-suffix"
+    assert cfgmod.state_paths("client_suffix", "CC_CLIENT_ID_FILE") == ["/tmp/pinned-suffix"]
+
+
+def test_machine_suffix_is_stable_and_not_random():
+    """MAC-derived, so it survives restarts with no disk at all. None if untrustworthy."""
+    got = cfgmod._machine_suffix()
+    if got is None:
+        return                                  # no stable MAC here; random path covers it
+    assert got == cfgmod._machine_suffix()
+    assert len(got) == 6
 
 
 if __name__ == "__main__":
