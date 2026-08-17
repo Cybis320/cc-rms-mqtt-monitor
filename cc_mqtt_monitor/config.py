@@ -10,9 +10,57 @@ settings can be overridden from the environment for convenience:
     CC_MQTT_PASSWORD    -> broker.password
 """
 
+import binascii
+import logging
 import os
 import socket
 from dataclasses import dataclass, field, asdict
+
+log = logging.getLogger("cc_mqtt_monitor")
+
+# Where the per-install identity suffix lives (see _instance_suffix).
+CLIENT_ID_FILE = "/var/lib/cc-rms-monitor/client_suffix"
+
+
+def _instance_suffix():
+    """A short id that is stable for this install and unique across machines.
+
+    Hostnames are NOT unique in this fleet, and two things were keyed on them:
+
+      * the MQTT client id -- and ids are exclusive, so a second client using one
+        already in use gets the incumbent kicked off. Four machines that kept the
+        default `raspberrypi` evicted each other at ~5 reconnects/second, forever.
+      * the HOST topic -- so those same four machines all wrote one retained
+        stations/raspberrypi/health, each overwriting the last. Only the newest
+        writer was ever visible, hiding host-level disk/OOM/NIC/memory state for
+        the other three. One of them (BE000A) went quiet for ten hours, degraded
+        with a low disk, and nothing could show it.
+
+    Deliberately NOT /etc/machine-id: the fleet is imaged from a common source, so
+    clones share one (the same reason powered-off boxes show "online" in RustDesk).
+    A persisted random value is unique even among clones.
+    """
+    path = os.environ.get("CC_CLIENT_ID_FILE", CLIENT_ID_FILE)
+    try:
+        with open(path) as fh:
+            got = fh.read().strip()
+        if got:
+            return got
+    except (IOError, OSError):
+        pass
+    suffix = binascii.hexlify(os.urandom(3)).decode("ascii")
+    try:
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(suffix + "\n")
+    except (IOError, OSError):
+        # Read-only /var or no permission: still unique per process, which is what
+        # stops the eviction war and the record overwriting. It changes on restart,
+        # which the rename cleanup then tidies up.
+        log.warning("could not persist identity suffix at %s; using a per-run id", path)
+    return suffix
 
 try:
     import yaml
@@ -206,6 +254,12 @@ class Config:
     # Identifier for this host (defaults to the system hostname).
     host_name: str = None
 
+    # Globally unique identity for THIS install: host_name plus a persisted suffix.
+    # host_name is the human label; host_uid is the key -- what the host topic is
+    # named and what station records point at. They differ only because hostnames
+    # collide (see _instance_suffix). Derived in __post_init__; never configured.
+    host_uid: str = None
+
     # Explicit subscription-group override (the installer's choice). When set, it
     # applies to every station on this host; when null, each station uses its own
     # RMS `camera_group_name`. Published as `group` (+ a slugified `group_slug`).
@@ -228,6 +282,8 @@ class Config:
     def __post_init__(self):
         if not self.host_name:
             self.host_name = socket.gethostname()
+        if not self.host_uid:
+            self.host_uid = "%s-%s" % (self.host_name, _instance_suffix())
         self.stations_dir = os.path.expanduser(self.stations_dir)
         self.rms_dir = os.path.expanduser(self.rms_dir)
 

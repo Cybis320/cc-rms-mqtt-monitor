@@ -30,7 +30,7 @@ class Viewer:
         self.config = config
         self.states = {}
         self.client = _make_client(
-            "%s-viewer-%s" % (config.broker.client_id_prefix, config.host_name))
+            "%s-viewer-%s" % (config.broker.client_id_prefix, config.host_uid))
         if config.broker.username:
             self.client.username_pw_set(
                 config.broker.username, config.broker.password)

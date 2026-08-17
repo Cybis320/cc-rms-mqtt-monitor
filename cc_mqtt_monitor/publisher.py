@@ -2,12 +2,17 @@
 
 Topic layout (with default prefix):
 
-    stations/<host>/status      retained, "online"/"offline" (LWT)
-    stations/<host>/health      retained, JSON host (OS) state blob
+    stations/<host_uid>/status  retained, "online"/"offline" (LWT)
+    stations/<host_uid>/health  retained, JSON host (OS) state blob
     stations/<station>/health   retained, JSON per-station state blob
+
+`host_uid` is host_name + a per-install suffix, NOT the bare hostname: hostnames
+collide (four machines here are all called `raspberrypi`), and colliding hosts wrote
+one shared retained record, each overwriting the last. Station records carry the same
+value in `host`, so a station still points at its host; `host_label` carries the plain
+hostname for display. See config._instance_suffix.
 """
 
-import binascii
 import copy
 import json
 import logging
@@ -15,6 +20,8 @@ import os
 import time
 
 import paho.mqtt.client as mqtt
+
+from .config import CLIENT_ID_FILE, _instance_suffix   # noqa: F401  (re-exported)
 
 log = logging.getLogger("cc_mqtt_monitor")
 
@@ -25,44 +32,6 @@ log = logging.getLogger("cc_mqtt_monitor")
 # offline for hours while the station was capturing normally. Bounded, an outage of any
 # length costs the same handful of superseded snapshots.
 MAX_QUEUED_MESSAGES = 200
-
-# Where the per-install client-id suffix lives (see _instance_suffix).
-CLIENT_ID_FILE = "/var/lib/cc-rms-monitor/client_suffix"
-
-
-def _instance_suffix():
-    """A short id that is stable for this install and unique across machines.
-
-    MQTT client ids must be unique: a second client connecting with an id already in
-    use gets the incumbent kicked off, so two such hosts evict each other forever. The
-    id was host_name-derived, and hostnames are NOT unique in this fleet -- four
-    machines that kept the default `raspberrypi` fought at ~5 reconnects/second, each
-    eviction re-publishing the LWT and the retained status topic.
-
-    Deliberately NOT /etc/machine-id: the fleet is imaged from a common source, so
-    clones share one machine-id (the same reason powered-off boxes show as "online"
-    in RustDesk). A persisted random value is unique even among clones.
-    """
-    path = os.environ.get("CC_CLIENT_ID_FILE", CLIENT_ID_FILE)
-    try:
-        with open(path) as fh:
-            got = fh.read().strip()
-        if got:
-            return got
-    except (IOError, OSError):
-        pass
-    suffix = binascii.hexlify(os.urandom(3)).decode("ascii")
-    try:
-        d = os.path.dirname(path)
-        if d:
-            os.makedirs(d, exist_ok=True)
-        with open(path, "w") as fh:
-            fh.write(suffix + "\n")
-    except (IOError, OSError):
-        # Read-only /var or no permission: still unique per process, which is all
-        # that is needed to stop the eviction war. It just changes on restart.
-        log.warning("could not persist client-id suffix at %s; using a per-run id", path)
-    return suffix
 
 
 def _make_client(client_id, transport="tcp"):
@@ -84,9 +53,8 @@ class Publisher:
         self.config = config
         self.announce = announce
         self.host_status_topic = "%s/%s/status" % (
-            config.topic_prefix, config.host_name)
-        self._client_id = "%s-%s-%s" % (config.broker.client_id_prefix,
-                                        config.host_name, _instance_suffix())
+            config.topic_prefix, config.host_uid)
+        self._client_id = "%s-%s" % (config.broker.client_id_prefix, config.host_uid)
         if not announce:
             self._client_id += "-test"
         self._pending = []
@@ -245,7 +213,7 @@ class Publisher:
         config edit, or the machine's hostname changing under us.
         """
         path = os.environ.get("CC_HOSTNAME_FILE", self.HOSTNAME_FILE)
-        now = self.config.host_name
+        now = self.config.host_uid
         prev = None
         try:
             with open(path) as fh:
@@ -275,7 +243,7 @@ class Publisher:
         return "%s/%s/health" % (self.config.topic_prefix, station_id)
 
     def _host_state_topic(self):
-        return "%s/%s/health" % (self.config.topic_prefix, self.config.host_name)
+        return "%s/%s/health" % (self.config.topic_prefix, self.config.host_uid)
 
     def _publish(self, topic, payload, retain=True):
         """Publish QoS-1 and track the message so flush() can confirm delivery.

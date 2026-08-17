@@ -130,8 +130,9 @@ def gather(config, maint=None, host_metrics=None):
                 # open feed (it'd leak internal network structure / an attack target).
                 metrics = {"station_id": sid, "camera_ping_ok": False,
                            "camera_standby": True, "camera_unreachable_s": round(secs, 1)}
-                state = build_state(metrics, config.thresholds, config.host_name,
-                                    _iso(now), disabled, host_metrics)
+                state = build_state(metrics, config.thresholds, config.host_uid,
+                                    _iso(now), disabled, host_metrics,
+                                    host_label=config.host_name)
                 states.append(decorate(state, station))
                 continue
             _STANDBY.discard(sid)
@@ -164,8 +165,9 @@ def gather(config, maint=None, host_metrics=None):
         if standby:
             _STANDBY.add(sid)
 
-        state = build_state(metrics, config.thresholds, config.host_name,
-                            _iso(now), disabled, host_metrics)
+        state = build_state(metrics, config.thresholds, config.host_uid,
+                            _iso(now), disabled, host_metrics,
+                            host_label=config.host_name)
         states.append(decorate(state, station))
     return states
 
@@ -210,8 +212,9 @@ def gather_host(config, maint=None):
                 ages.append(age)
         if ages:
             metrics["capture_restart_age_s"] = min(ages)   # most recently (re)started capture
-    state = build_host_state(metrics, config.thresholds, config.host_name,
-                             _iso(time.time()), disabled)
+    state = build_host_state(metrics, config.thresholds, config.host_uid,
+                             _iso(time.time()), disabled,
+                             host_label=config.host_name)
     # A host can span several groups; list the distinct ones plus its stations,
     # so the bridge can fan a host-level (OOM) alert out to each.
     groups = sorted({g for g in (_station_group(s, config) for s in stations) if g})
@@ -248,8 +251,9 @@ def run_diagnose(config, station_id=None):
         metrics = collect_station(station, config.log_tail_lines, now,
                                   config.log_warning_ignore, config.log_window_s)
         metrics.update(diagnose.run_probe(station, now))   # force, no gating
-        state = build_state(metrics, config.thresholds, config.host_name,
-                            _iso(now), disabled, host_state)
+        state = build_state(metrics, config.thresholds, config.host_uid,
+                            _iso(now), disabled, host_state,
+                            host_label=config.host_name)
         reports.append(state)
     return host_state, reports
 
@@ -275,7 +279,8 @@ def make_test_state(config):
         "group": group,
         "group_slug": _slug(group),
         "test": True,
-        "host": config.host_name,
+        "host": config.host_uid,
+        "host_label": config.host_name,
         "timestamp": _iso(now),
     }
 
@@ -299,8 +304,8 @@ def make_udp_test_state(config, rate=999.0):
         metrics["udp_rcvbuf_error_pct"] = 0.0
     # Ensure the udp check fires even if it's in disabled_checks for this host.
     disabled = set(config.disabled_checks or []) - {"udp_rcvbuf_errors"}
-    state = build_host_state(metrics, config.thresholds, config.host_name,
-                             _iso(now), disabled)
+    state = build_host_state(metrics, config.thresholds, config.host_uid,
+                             _iso(now), disabled, host_label=config.host_name)
     groups = sorted({g for g in (_station_group(s, config) for s in stations) if g})
     state["groups"] = groups
     state["group_slugs"] = [_slug(g) for g in groups]

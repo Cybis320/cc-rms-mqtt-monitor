@@ -612,7 +612,8 @@ def evaluate_host(metrics, thresholds, disabled=()):
     return state["status"], state["problems"]
 
 
-def build_state(metrics, thresholds, host_name, timestamp, disabled=(), host_metrics=None):
+def build_state(metrics, thresholds, host_name, timestamp, disabled=(), host_metrics=None,
+                host_label=None):
     """Assemble the published JSON state for one station.
 
     `host_metrics` (the same cycle's host record) lets the drop classifier use
@@ -626,15 +627,23 @@ def build_state(metrics, thresholds, host_name, timestamp, disabled=(), host_met
     state["status"] = status
     state["problems"] = problems
     state["host"] = host_name
+    # `host` is the KEY consumers join on (the host topic's name); `host_label` is the
+    # plain hostname for display. They differ because hostnames collide -- see
+    # config._instance_suffix -- so the key must not be the label.
+    state["host_label"] = host_label or host_name
     state["timestamp"] = timestamp
     return state
 
 
-def build_host_state(metrics, thresholds, host_name, timestamp, disabled=()):
+def build_host_state(metrics, thresholds, host_name, timestamp, disabled=(), host_label=None):
     status, problems = evaluate_host(metrics, thresholds, disabled)
     state = dict(metrics)
     state["status"] = status
     state["problems"] = problems
     state["host"] = host_name
+    # `host` is the KEY consumers join on (the host topic's name); `host_label` is the
+    # plain hostname for display. They differ because hostnames collide -- see
+    # config._instance_suffix -- so the key must not be the label.
+    state["host_label"] = host_label or host_name
     state["timestamp"] = timestamp
     return state

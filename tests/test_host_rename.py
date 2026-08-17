@@ -38,7 +38,13 @@ class _Broker(object):
 class _Cfg(object):
     topic_prefix = "stations"
     broker = _Broker()
-    def __init__(self, host): self.host_name = host
+
+    def __init__(self, host, uid=None):
+        self.host_name = host
+        # host_uid is the identity the topics are named after (host_name + a
+        # per-install suffix). Defaults to host_name here so these cases stay about
+        # renaming alone; the suffix migration has its own case below.
+        self.host_uid = uid or host
 
 
 class _Client(object):
@@ -49,8 +55,8 @@ class _Client(object):
 
 class _Pub(publisher.Publisher):
     """Bypass __init__/connect: we are unit-testing the rename cleanup alone."""
-    def __init__(self, host, path):
-        self.config = _Cfg(host)
+    def __init__(self, host, path, uid=None):
+        self.config = _Cfg(host, uid)
         self.client = _Client()
         os.environ["CC_HOSTNAME_FILE"] = path
 
@@ -95,6 +101,27 @@ def test_rename_is_recorded_so_it_only_fires_once():
     p = _Pub("new", path)
     p.clear_renamed_host()
     assert p.client.published == []                       # already tombstoned last time
+
+
+def test_migrating_to_a_unique_host_uid_tombstones_the_shared_topic():
+    """The raspberrypi case: several machines shared one bare-hostname host topic,
+    overwriting each other's record. Moving to a per-install host_uid must clear that
+    shared topic, or the last frozen copy of it lingers retained forever."""
+    path = _tmp()
+    _Pub("raspberrypi", path).clear_renamed_host()          # old world: topic == hostname
+    p = _Pub("raspberrypi", path, uid="raspberrypi-a1b2c3")  # ...now uniquely identified
+    p.clear_renamed_host()
+    topics = {t for t, _, _ in p.client.published}
+    assert topics == {"stations/raspberrypi/health", "stations/raspberrypi/status"}
+    for _t, payload, retain in p.client.published:
+        assert payload == b"" and retain is True
+
+
+def test_each_colliding_machine_keeps_its_own_uid():
+    """Two machines that shared the hostname must not end up sharing the new topic."""
+    a = _Pub("raspberrypi", _tmp(), uid="raspberrypi-aaaaaa")
+    b = _Pub("raspberrypi", _tmp(), uid="raspberrypi-bbbbbb")
+    assert a._host_state_topic() != b._host_state_topic()
 
 
 if __name__ == "__main__":

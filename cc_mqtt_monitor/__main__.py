@@ -137,7 +137,7 @@ def main(argv=None):
         finally:
             publisher.disconnect()
         print("UDP test host alert sent (non-retained) to %s/%s/health:"
-              % (config.topic_prefix, config.host_name))
+              % (config.topic_prefix, config.host_uid))
         print(json.dumps(state, indent=2, default=str))
         print("\nBridge should route it to:", ", ".join(
             "cc-%s" % gs for gs in state.get("group_slugs") if gs) or "(no group_slug)")
