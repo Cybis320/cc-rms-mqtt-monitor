@@ -282,8 +282,13 @@ class Config:
     def __post_init__(self):
         if not self.host_name:
             self.host_name = socket.gethostname()
-        if not self.host_uid:
-            self.host_uid = "%s-%s" % (self.host_name, _instance_suffix())
+        # ALWAYS recomputed, never preserved: load_config constructs Config() first (so
+        # host_name falls back to the machine hostname) and only then applies the YAML,
+        # calling __post_init__ again. Keeping an existing value there froze the uid to
+        # the machine hostname and ignored the configured host_name -- the renamed host
+        # WSU_Lind published as `ProCamSFF14-0a3fe4`, resurrecting the very name the
+        # operator had renamed away from, and putting a private machine name in a topic.
+        self.host_uid = "%s-%s" % (self.host_name, _instance_suffix())
         self.stations_dir = os.path.expanduser(self.stations_dir)
         self.rms_dir = os.path.expanduser(self.rms_dir)
 
