@@ -313,11 +313,14 @@ def evaluate(metrics, thresholds, disabled=()):
     # below so it is reported even while the station still looks "up".
     inst = metrics.get("capture_instances")
     if isinstance(inst, int) and inst > 1:
-        rss = metrics.get("total_rss_mb")
+        # Prefer Pss for the figure shown to a human: summing RSS counts the tree's
+        # shared pages once per process, so the duplicate's cost reads far higher than
+        # the RAM actually at stake. Fall back to RSS where Pss is unavailable.
+        mem = metrics.get("total_pss_mb") or metrics.get("total_rss_mb")
         flag(ERROR, "capture_duplicate",
              "%d StartCapture instances running for this one camera%s -- they will keep "
              "multiplying and exhaust memory; kill the extras and check what is respawning it"
-             % (inst, (" (%.0f MB total)" % rss) if rss else ""))
+             % (inst, (" (%.0f MB total)" % mem) if mem else ""))
 
     if not metrics.get("capture_alive"):
         flag(ERROR, "capture_down", "Capture process not running")

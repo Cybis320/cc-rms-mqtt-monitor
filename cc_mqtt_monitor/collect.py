@@ -58,6 +58,30 @@ _CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 _PROC_CPU_LAST = {}
 
 
+def _proc_pss_kb(pid):
+    """Proportional set size for one process, or None if it cannot be read.
+
+    Pss is RSS with each shared page divided by the number of processes sharing it, so
+    summing Pss across a process tree gives a figure that can be compared to real RAM.
+    Summing RSS does NOT: every process in an RMS capture tree counts the same shared
+    pages again. On a six-camera host that read as ~60 GB of "usage" on a 31 GB box --
+    off by ~1.85x on measurement here -- which is enough to make an operator chase a
+    leak that is not there.
+
+    None (not 0) when /proc/<pid>/smaps_rollup is missing (kernel < 4.14) or unreadable
+    (process owned by another user, or exited mid-read), so the caller can tell "cannot
+    measure" from "measured zero".
+    """
+    try:
+        with open("/proc/%d/smaps_rollup" % pid) as fh:
+            for line in fh:
+                if line.startswith("Pss:"):
+                    return int(line.split()[1])
+    except (IOError, OSError, ValueError, IndexError):
+        return None
+    return None
+
+
 def _proc_cpu_jiffies(pid):
     """utime+stime (clock ticks) for a pid, or 0 if unreadable. The comm field
     can contain spaces/parens, so fields are parsed AFTER the final ')'."""
@@ -186,6 +210,13 @@ def collect_process(station):
         stack.extend(children.get(p, []))
 
     total_rss_mb = round(sum(rss.get(p, 0) for p in tree) / 1024.0, 1)
+    # Pss alongside RSS, never instead of it: `rss` carries months of history in
+    # cc-trends, and silently redefining it would make old and new samples look
+    # comparable when they are not -- a step change reads as a real event. See
+    # _proc_pss_kb for why the RSS sum over-counts.
+    _pss = [_proc_pss_kb(p) for p in tree]
+    _pss = [v for v in _pss if v is not None]
+    total_pss_mb = round(sum(_pss) / 1024.0, 1) if _pss else None
 
     # CPU% of the whole capture tree over the interval (delta of cumulative
     # utime+stime / wall time). A saturated capture process is the on-station
@@ -215,6 +246,9 @@ def collect_process(station):
         # station a settling grace measured from ITS OWN restart, not host-wide.
         "capture_age_s": _proc_age_s(main_pid) if main_pid is not None else None,
         "total_rss_mb": total_rss_mb,
+        # Sums correctly across the tree; total_rss_mb does not (shared pages counted
+        # once per process). None where smaps_rollup is unavailable/unreadable.
+        "total_pss_mb": total_pss_mb,
         "capture_cpu_pct": cpu_pct,
     }
 
