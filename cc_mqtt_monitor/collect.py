@@ -841,9 +841,13 @@ def _tail(path, max_lines):
 def _extract_traceback(lines, idx):
     """Given the index of a 'Traceback' line, return the final exception line."""
     # The last non-blank line of a traceback block is the exception summary.
+    # Traceback body lines carry no RMS timestamp prefix, so the block ends
+    # where the next timestamped log line resumes (RMS logs contain no blank
+    # lines, so waiting for one would swallow the rest of the tail and report
+    # whatever line happened to be last at scan time).
     block = []
     for line in lines[idx:]:
-        if line.strip() == "" and block:
+        if block and (line.strip() == "" or _LOG_TS_RE.match(line)):
             break
         block.append(line)
     for line in reversed(block):
