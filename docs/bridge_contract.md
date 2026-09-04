@@ -117,6 +117,15 @@ Distinguish the two `health` shapes by payload:
 - `station_ids` — list of cameras on that host
 - `groups`, `group_slugs` — distinct groups on that host
 - `host`, `timestamp`
+- `last_shutdown` (`"clean"` | `"unclean"` | `"unknown"` | null) + `last_shutdown_age_s` — how the PREVIOUS boot ended, judged once at startup from a boot
+  marker the monitor keeps (heartbeat while alive, stamped `shutdown` when systemd stops it
+  during a reboot/poweroff). `unclean` = the box was still running and never shut down: a
+  **power cut, hard reset or kernel panic**; the age is seconds since it was last seen alive
+  (the outage time to ~2 min). `unknown` = the monitor was not running when the boot ended
+  (never alerted). null = no verdict this boot (first run). The `unclean_shutdown` problem
+  is a degraded advisory that ages out after `unclean_shutdown_recent_s` (24 h); the field
+  itself stays for the whole boot. Fires AFTER the `booting` maintenance window, so it is
+  the one notification a station sends about an outage it has already recovered from.
 - *UDP-only (present when a station uses `protocol: udp`):* `udp_rcvbuf_errors`
   (cumulative), `udp_rcvbuf_errors_per_min` (growth rate — the alert signal),
   `udp_rcvbuf_error_pct`, `udp_in_datagrams`, `udp_rmem_max`. A

@@ -77,7 +77,8 @@ group: null
 # platepar_mismatch, config_fov_mismatch, backend_fallback,
 # timelapse_missing, timelapse_overdue, log_fatal, log_warning, watchdog,
 # disk_low, upload_backlog, clock_unsynced, clock_uncertainty, dropped_frames,
-# oom, mem_pressure, udp_rcvbuf_errors, nic_errors, disk_errors.
+# oom, mem_pressure, udp_rcvbuf_errors, nic_errors, disk_errors, update_blocked,
+# unclean_shutdown.
 disabled_checks: []
 
 # Dropped-frame attribution: each station record carries a drop_cause /
@@ -136,6 +137,7 @@ thresholds:
   # 10s full-stall % spikes; error when the 60s full-stall % stays high (OOM near).
   mem_psi_full_avg10_warn: 10  # % time ALL tasks stalled on memory over 10s
   mem_psi_full_avg60_error: 10 # % over 60s (sustained => OOM risk)
+  unclean_shutdown_recent_s: 86400  # keep the 'power cut / hard reset' advisory for 24h
 
   # --- Dropped-frame attribution (classify_drops) + adaptive probe ---
   # These tune which cause a drop is pinned on, and whether it's host-explained

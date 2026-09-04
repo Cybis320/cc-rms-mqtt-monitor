@@ -13,6 +13,8 @@ Every check has a stable key (see CHECK_KEYS); a key listed in `disabled`
 (config `disabled_checks`) is silently skipped. All checks are on by default.
 """
 
+import time
+
 OK = "ok"
 DEGRADED = "degraded"
 ERROR = "error"
@@ -47,6 +49,7 @@ CHECK_KEYS = (
     "nic_errors",         # host NIC RX errors climbing (wire/link)
     "disk_errors",        # host kernel disk I/O errors / read-only remount
     "update_blocked",     # the monitor's own auto-update is stuck on this host
+    "unclean_shutdown",   # previous boot ended without a clean shutdown (power cut)
 )
 
 
@@ -538,6 +541,23 @@ def evaluate_host(metrics, thresholds, disabled=()):
         flag(DEGRADED, "update_blocked",
              "Monitor auto-update is blocked (%s) -- this station is stuck on old code"
              % str(blocked)[:120])
+
+    # The previous boot ended with the monitor still alive and no shutdown in progress:
+    # the power went, someone pulled the plug, or the kernel panicked (see bootmarker).
+    # The box is back by the time this is evaluated, so it is an advisory, not an error,
+    # and it ages out: the field stays on the record for the whole boot, the alert
+    # does not. `maintenance: booting` keeps the bridge quiet for the first minutes.
+    # `unknown` (the monitor was not running when the boot ended) is never flagged.
+    shut_age = _num(metrics, "last_shutdown_age_s")
+    if (metrics.get("last_shutdown") == "unclean"
+            and (shut_age is None or shut_age <= thresholds.unclean_shutdown_recent_s)):
+        when = ""
+        if shut_age is not None:
+            when = " (last seen alive %s)" % time.strftime(
+                "%Y-%m-%d %H:%M UTC", time.gmtime(time.time() - shut_age))
+        flag(DEGRADED, "unclean_shutdown",
+             "Host was not shut down cleanly %s ago -- power cut or hard reset%s"
+             % (_fmt_dur(shut_age), when))
 
     oom_n = metrics.get("oom_kill_count")
     oom_age = metrics.get("oom_last_age_s")

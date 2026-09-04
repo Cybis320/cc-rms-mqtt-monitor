@@ -3,6 +3,7 @@
 import os
 import re
 import time
+import signal
 import logging
 
 from .config import reload_config
@@ -13,6 +14,7 @@ from .collect import (collect_station, collect_process, rms_branch, rms_remote,
 from .oslevel import collect_host, iface_for_ip
 from .health import build_state, build_host_state, output_stalled
 from . import maintenance
+from . import bootmarker
 from . import diagnose
 
 log = logging.getLogger("cc_mqtt_monitor")
@@ -413,12 +415,21 @@ def run_loop(config, publisher, config_path=None):
     else:
         log.info("Could not lower oom_score_adj; rely on systemd OOMScoreAdjust")
 
+    # systemd stops us with SIGTERM, whose default action kills the process outright --
+    # no `finally`, no clean disconnect, and no chance to record HOW we are ending. Route
+    # it into the KeyboardInterrupt path so a stop is a stop, whatever sent it.
+    signal.signal(signal.SIGTERM, _raise_interrupt)
+    # Was the previous boot shut down cleanly? Decide now (compares the marker's boot id
+    # with the kernel's), then keep the marker fresh for the next boot to judge us by.
+    bootmarker.start()
+
     connected = False
     cleared = set()   # opted-out station ids whose retained record we've wiped
     cfg_mtime = _config_mtime(config_path)
     try:
         while True:
             start = time.time()
+            bootmarker.heartbeat()
 
             # Hot-reload config.yaml on change (content fields only; see docstring).
             new_mtime = _config_mtime(config_path)
@@ -471,8 +482,13 @@ def run_loop(config, publisher, config_path=None):
     except KeyboardInterrupt:
         log.info("Interrupted; shutting down")
     finally:
+        bootmarker.stop()     # first: it must land even if the disconnect hangs
         if connected:
             publisher.disconnect()
+
+
+def _raise_interrupt(signum, frame):
+    raise KeyboardInterrupt
 
 
 # How often, during the inter-cycle sleep, to re-check the maintenance state.

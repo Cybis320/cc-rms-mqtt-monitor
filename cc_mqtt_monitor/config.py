@@ -223,6 +223,10 @@ class Thresholds:
     # -- because capture can be "up" yet degraded after an OOM, so only a reboot proves
     # the box is clean. This value is just the error->advisory transition.
     oom_recent_s: int = 900             # 15 min
+    # How long after an unclean shutdown (power cut / hard reset, judged at boot from
+    # the boot marker) the host record keeps the advisory. The last_shutdown field
+    # itself stays for the whole boot; only the alert ages out.
+    unclean_shutdown_recent_s: int = 86400   # 24 h
 
     # --- Dropped-frame attribution (classify_drops) ----------------------
     # These set when a signal is "hot" for the elimination logic that pins a

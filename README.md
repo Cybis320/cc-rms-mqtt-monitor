@@ -49,6 +49,7 @@ In addition to per-station health, each cycle publishes one **host** record:
 | **Disk failure** | kernel-log scan for I/O errors / mmc(blk) errors / EXT4-fs errors / **read-only remount** — the medium-agnostic "disk failing" canary (worn SD cards included), which a slow-but-healthy card won't trip |
 | **NIC errors / IP reassembly** | RX **hardware-error** growth (errs+fifo+frame, *not* `rx_dropped` — that's benign discarded multicast) from `/proc/net/dev`, **scoped to the camera-facing interface(s)** (resolved per camera IP via `/proc/net/route`, so an internet/wifi NIC on a dedicated-cam-subnet box is ignored; a shared single-NIC host resolves to that one NIC), plus `Ip.ReasmFails` from `/proc/net/snmp` (UDP only). `rx_dropped` and the watched `nic_cam_interfaces` are reported for context. |
 | **Uptime** | host uptime |
+| **Unclean shutdown** | a **boot marker** the monitor keeps in its state dir (`live` heartbeat every 2 min; `shutdown` when systemd stops it as part of a reboot/poweroff; `stopped` when only the monitor was stopped). At the next boot the marker's boot id is compared with the kernel's: a different boot with a `live` marker means the previous boot ended with no shutdown — a **power cut, hard reset or kernel panic**. Published as `last_shutdown` (`clean`/`unclean`/`unknown`) + `last_shutdown_age_s` (when the box was last seen alive, so the outage time to ~2 min). `unknown` = the monitor wasn't running when the boot ended, never flagged. |
 
 The agent **protects itself from the OOM-killer** so it survives to report the
 event that kills an RMS process: the systemd unit sets `OOMScoreAdjust=-900`
@@ -83,6 +84,7 @@ the human-readable text.
 | `clock_uncertainty` | degraded | last summary clock error over threshold | `clock_error_warn_ms` (100) |
 | `dropped_frames` | degraded | dropped frames in the last 10 min — the alert text names the attributed **cause** (see below) | `dropped_frames_warn` (10) |
 | `oom` | error (python victim) / degraded | host OOM-killer fired (kernel log) | — |
+| `unclean_shutdown` | degraded | previous boot ended without a clean shutdown (power cut / hard reset / kernel panic), judged from the boot marker at startup. Advisory: the field stays for the whole boot, the alert ages out | `unclean_shutdown_recent_s` (86400) |
 | `mem_pressure` | degraded / error | host memory **pressure** (PSI) — `full avg10` spiking / sustained `full avg60` high (pre-OOM, scale-independent) | `mem_psi_full_avg10_warn` (10) / `mem_psi_full_avg60_error` (10) |
 | `udp_rcvbuf_errors` | degraded | host UDP RcvbufErrors growth rate (only when a station uses `protocol: udp`) | `udp_rcvbuf_errors_per_min_warn` (0 = any increase) |
 | `nic_errors` | degraded | camera-facing NIC RX **hardware**-error growth (wire/cable/duplex/port; excludes benign `rx_dropped`) | `nic_rx_errors_per_min_warn` (0 = any increase) |

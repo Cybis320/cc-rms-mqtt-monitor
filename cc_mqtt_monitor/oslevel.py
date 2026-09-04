@@ -13,6 +13,7 @@ import calendar
 import subprocess
 
 from .sanitize import redact
+from . import bootmarker
 
 # OOM-killer signatures, e.g.:
 #   "Out of memory: Killed process 12345 (python) total-vm:..."
@@ -598,6 +599,7 @@ def collect_host(scan_oom_events=True, udp=False, cam_interfaces=None,
         metrics.update(scan_disk_errors(lines=klines, note=knote,
                                         data_paths=data_paths))
     metrics["uptime_s"] = _uptime()
+    metrics.update(bootmarker.metrics())   # last_shutdown: clean / unclean / unknown
     metrics.update(monitor_version())
     metrics.update(collect_cpu_pressure())
     metrics.update(collect_nic_errors(cam_interfaces))
