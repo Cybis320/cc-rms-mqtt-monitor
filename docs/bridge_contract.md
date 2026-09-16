@@ -126,6 +126,11 @@ Distinguish the two `health` shapes by payload:
   is a degraded advisory that ages out after `unclean_shutdown_recent_s` (24 h); the field
   itself stays for the whole boot. Fires AFTER the `booting` maintenance window, so it is
   the one notification a station sends about an outage it has already recovered from.
+- `nic_link` — `{iface: {speed_mbps, duplex, operstate}}` for the camera-facing NIC(s)
+  (from sysfs; `speed_mbps`/`duplex` null on wifi or a down link) + `nic_link_speed_mbps`
+  / `nic_link_duplex` — the SLOWEST watched wired link. A `nic_link_slow` problem
+  (degraded) means a gigabit port has negotiated down (typically 100 Mb/s): a cable /
+  switch-port fault caught before packets are lost. Host-wide; route like any host alert.
 - *UDP-only (present when a station uses `protocol: udp`):* `udp_rcvbuf_errors`
   (cumulative), `udp_rcvbuf_errors_per_min` (growth rate — the alert signal),
   `udp_rcvbuf_error_pct`, `udp_in_datagrams`, `udp_rmem_max`. A

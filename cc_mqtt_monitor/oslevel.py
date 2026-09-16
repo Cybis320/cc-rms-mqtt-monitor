@@ -536,6 +536,78 @@ def collect_nic_errors(interfaces=None):
     return result
 
 
+# Link speed / duplex per interface from sysfs. A gigabit NIC that has
+# auto-negotiated down to 100 Mb/s (or 10) almost always means a damaged cable,
+# a bad crimp / patch panel, a flaky switch port, or auto-neg failing -- exactly
+# the physical faults that the error counters only reveal once packets are lost.
+# Reading the negotiated rate catches the fault while the stream still "works".
+_SYSFS_NET = "/sys/class/net"
+
+
+def _sysfs_read(root, iface, attr):
+    """One sysfs attribute of an interface as a stripped string, or None.
+    `speed`/`duplex` raise EINVAL on interfaces without a PHY (wifi, lo, bridges,
+    veth) and on a wired NIC whose link is down -- both simply become None."""
+    try:
+        with open(os.path.join(root, iface, attr)) as fh:
+            return fh.read().strip()
+    except (IOError, OSError):
+        return None
+
+
+def read_nic_link(interfaces=None, sysfs=None):
+    """Negotiated link state per interface: {iface: {speed_mbps, duplex, operstate}}.
+
+    `interfaces` restricts the set to the camera-facing NIC(s) (as for
+    read_nic_stats); None takes every interface under /sys/class/net except 'lo'
+    and the usual virtual ones. Interfaces with no readable, positive speed (wifi,
+    link down, unknown) get speed_mbps None so the caller can tell "not a wired
+    link" from "a slow wired link". `sysfs` overrides the sysfs root (tests)."""
+    root = sysfs or _SYSFS_NET
+    links = {}
+    try:
+        names = sorted(os.listdir(root))
+    except (IOError, OSError):
+        return links
+    for name in names:
+        if interfaces is not None:
+            if name not in interfaces:
+                continue
+        elif name == "lo" or name.startswith(("veth", "docker", "br-", "virbr", "tap", "tun")):
+            continue
+        speed = _sysfs_read(root, name, "speed")
+        duplex = _sysfs_read(root, name, "duplex")
+        oper = _sysfs_read(root, name, "operstate")
+        try:
+            speed = int(speed) if speed is not None else None
+        except ValueError:
+            speed = None
+        if speed is not None and speed <= 0:   # -1 = unknown / link down
+            speed = None
+        links[name] = {"speed_mbps": speed,
+                       "duplex": duplex if duplex in ("full", "half") else None,
+                       "operstate": oper}
+    return links
+
+
+def collect_nic_link(interfaces=None):
+    """Host NIC link-speed summary for the health record.
+
+    `nic_link` is the per-interface detail; `nic_link_speed_mbps` is the SLOWEST
+    negotiated rate among the watched wired links (the alert signal -- one bad
+    cable on a two-NIC box is still a bad cable); `nic_link_duplex` is the duplex
+    of that slowest link. Interfaces with no wired link (wifi, down) are excluded
+    from the summary but kept in the detail."""
+    links = read_nic_link(interfaces)
+    wired = {n: l for n, l in links.items() if l["speed_mbps"] is not None}
+    result = {"nic_link": links or None, "nic_link_speed_mbps": None, "nic_link_duplex": None}
+    if wired:
+        slowest = min(wired, key=lambda n: wired[n]["speed_mbps"])
+        result["nic_link_speed_mbps"] = wired[slowest]["speed_mbps"]
+        result["nic_link_duplex"] = wired[slowest]["duplex"]
+    return result
+
+
 _IP_REASM_LAST = {}
 
 
@@ -603,6 +675,7 @@ def collect_host(scan_oom_events=True, udp=False, cam_interfaces=None,
     metrics.update(monitor_version())
     metrics.update(collect_cpu_pressure())
     metrics.update(collect_nic_errors(cam_interfaces))
+    metrics.update(collect_nic_link(cam_interfaces))
     if udp:
         metrics.update(collect_udp_errors())
         metrics.update(collect_ip_reasm())

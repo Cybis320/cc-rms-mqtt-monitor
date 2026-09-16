@@ -47,6 +47,7 @@ CHECK_KEYS = (
     "mem_pressure",       # host memory pressure (PSI) -- the pre-OOM signal
     "udp_rcvbuf_errors",  # host UDP receive-buffer overflows climbing (udp RTSP)
     "nic_errors",         # host NIC RX errors climbing (wire/link)
+    "nic_link_slow",      # camera-facing NIC negotiated below its expected speed
     "disk_errors",        # host kernel disk I/O errors / read-only remount
     "update_blocked",     # the monitor's own auto-update is stuck on this host
     "unclean_shutdown",   # previous boot ended without a clean shutdown (power cut)
@@ -620,6 +621,30 @@ def evaluate_host(metrics, thresholds, disabled=()):
         flag(DEGRADED, "nic_errors",
              "NIC RX errors climbing: %.1f/min (%s total)"
              % (nic_rate, metrics.get("nic_rx_errors")))
+
+    # NIC negotiated link speed below what the hardware should give (a gigabit
+    # port at 100 Mb/s): a damaged cable / bad crimp / flaky switch port / failed
+    # auto-neg. Caught from sysfs BEFORE packets are lost, so it explains a later
+    # nic_errors or dropped-frames burst -- and a 100 Mb link is still enough for
+    # the stream, so this is advisory. Judged per interface: one bad cable on a
+    # multi-NIC box is still a bad cable. Half duplex is named because it is the
+    # classic auto-neg-failure signature. 0 disables; wifi / down links (no speed)
+    # never fire.
+    want = thresholds.nic_link_speed_min_mbps
+    links = metrics.get("nic_link") or {}
+    if want and isinstance(links, dict):
+        slow = []
+        for iface in sorted(links):
+            link = links[iface] if isinstance(links[iface], dict) else {}
+            speed = _num(link, "speed_mbps")
+            if speed is not None and speed < want:
+                duplex = link.get("duplex")
+                slow.append("%s at %d Mb/s%s" % (
+                    iface, speed, (" half-duplex" if duplex == "half" else "")))
+        if slow:
+            flag(DEGRADED, "nic_link_slow",
+                 "NIC link speed dropped: %s (expected >= %d Mb/s -- check the cable "
+                 "/ switch port)" % (", ".join(slow), want))
 
     # Disk/storage failure from the kernel log -- the medium-agnostic "disk
     # failing" canary. Unlike iowait (chronically high on a healthy-but-slow SD
