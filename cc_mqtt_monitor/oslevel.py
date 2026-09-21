@@ -536,12 +536,105 @@ def collect_nic_errors(interfaces=None):
     return result
 
 
-# Link speed / duplex per interface from sysfs. A gigabit NIC that has
-# auto-negotiated down to 100 Mb/s (or 10) almost always means a damaged cable,
-# a bad crimp / patch panel, a flaky switch port, or auto-neg failing -- exactly
-# the physical faults that the error counters only reveal once packets are lost.
-# Reading the negotiated rate catches the fault while the stream still "works".
+# Link speed / duplex per interface from sysfs, plus what the far end OFFERED
+# (from ethtool). A gigabit NIC that has auto-negotiated down to 100 Mb/s (or 10)
+# almost always means a damaged cable, a bad crimp / patch panel, a flaky switch
+# port, or auto-neg failing -- exactly the physical faults that the error
+# counters only reveal once packets are lost. Reading the negotiated rate catches
+# the fault while the stream still "works".
+#
+# But 100 Mb/s is only WRONG when the far end could do better: a camera plugged
+# straight into the host, or a Fast-Ethernet switch, advertises 100 at most and
+# a 100 Mb link is exactly right there. The link partner's advertised modes
+# (ethtool) say what it can do, so expected = min(local supported, partner
+# advertised) is topology-independent: the same rule is right for a single cam
+# on a direct cable, six cams on a 100 Mb switch, and a gigabit switch with a
+# broken pair (the advertisements ride on the pairs that still work, so the
+# partner still shows 1000baseT while the PHY has downshifted to 100).
 _SYSFS_NET = "/sys/class/net"
+_ETHTOOL_PATHS = ("ethtool", "/usr/sbin/ethtool", "/sbin/ethtool")
+_LINK_MODE_RE = re.compile(r"(\d+)base\w+/(Full|Half)")
+
+
+def _run_ethtool(iface):
+    """`ethtool <iface>` text, or None if the tool is missing / errors / times out.
+    Root is not needed for the settings query (the netlink path may print
+    'Operation not permitted' to stderr and fall back to the ioctl -- harmless)."""
+    for exe in _ETHTOOL_PATHS:
+        try:
+            out = subprocess.run([exe, iface], stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, timeout=5,
+                                 universal_newlines=True)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if out.returncode == 0 and out.stdout:
+            return out.stdout
+        return None   # the tool ran and had nothing (wifi, virtual, no driver support)
+    return None
+
+
+def _max_mode_mbps(text):
+    """Highest speed among 'NNNbaseX/Full|Half' tokens, or None ('Not reported')."""
+    speeds = [int(m.group(1)) for m in _LINK_MODE_RE.finditer(text or "")]
+    return max(speeds) if speeds else None
+
+
+def parse_ethtool(text):
+    """The advertisement facts from `ethtool <iface>` output.
+
+    {supported_max_mbps, advertised_max_mbps, partner_max_mbps, partner_autoneg,
+    autoneg}. The link-mode lists span continuation lines (indented, no colon)
+    under their header; 'Not reported' yields None. partner_autoneg False means
+    the far port is FORCED (no auto-neg): the local side then parallel-detects to
+    half duplex -- the classic duplex-mismatch signature."""
+    lists = {}
+    key = None
+    autoneg = partner_autoneg = None
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        head, sep, tail = line.partition(":")
+        head = head.strip()
+        if sep and head in ("Supported link modes", "Advertised link modes",
+                            "Link partner advertised link modes"):
+            key = head
+            lists[key] = tail
+        elif sep:
+            key = None
+            val = tail.strip().lower()
+            if head == "Auto-negotiation":
+                autoneg = {"on": True, "off": False}.get(val)
+            elif head == "Link partner advertised auto-negotiation":
+                partner_autoneg = {"yes": True, "no": False}.get(val)
+        elif key:
+            lists[key] += " " + line
+    return {
+        "supported_max_mbps": _max_mode_mbps(lists.get("Supported link modes")),
+        "advertised_max_mbps": _max_mode_mbps(lists.get("Advertised link modes")),
+        "partner_max_mbps": _max_mode_mbps(lists.get("Link partner advertised link modes")),
+        "partner_autoneg": partner_autoneg,
+        "autoneg": autoneg,
+    }
+
+
+def _link_expectation(iface, ethtool=None):
+    """What this wired link SHOULD have negotiated: {expected_mbps, partner_max_mbps,
+    supported_max_mbps, partner_autoneg}. expected = min(local supported, partner
+    advertised) -- None when either side is unknown (no ethtool, driver reports
+    'Not reported'), so the caller stays silent rather than guessing."""
+    facts = {"expected_mbps": None, "partner_max_mbps": None,
+             "supported_max_mbps": None, "partner_autoneg": None}
+    text = (ethtool or _run_ethtool)(iface)
+    if not text:
+        return facts
+    adv = parse_ethtool(text)
+    facts["partner_max_mbps"] = adv["partner_max_mbps"]
+    facts["supported_max_mbps"] = adv["supported_max_mbps"]
+    facts["partner_autoneg"] = adv["partner_autoneg"]
+    if adv["partner_max_mbps"] and adv["supported_max_mbps"]:
+        facts["expected_mbps"] = min(adv["partner_max_mbps"], adv["supported_max_mbps"])
+    return facts
 
 
 def _sysfs_read(root, iface, attr):
@@ -555,14 +648,17 @@ def _sysfs_read(root, iface, attr):
         return None
 
 
-def read_nic_link(interfaces=None, sysfs=None):
-    """Negotiated link state per interface: {iface: {speed_mbps, duplex, operstate}}.
+def read_nic_link(interfaces=None, sysfs=None, ethtool=None):
+    """Negotiated link state per interface: {iface: {speed_mbps, duplex, operstate,
+    expected_mbps, partner_max_mbps, supported_max_mbps, partner_autoneg}}.
 
     `interfaces` restricts the set to the camera-facing NIC(s) (as for
     read_nic_stats); None takes every interface under /sys/class/net except 'lo'
     and the usual virtual ones. Interfaces with no readable, positive speed (wifi,
     link down, unknown) get speed_mbps None so the caller can tell "not a wired
-    link" from "a slow wired link". `sysfs` overrides the sysfs root (tests)."""
+    link" from "a slow wired link"; only links WITH a speed are asked for their
+    partner advertisement (one ethtool call each). `sysfs` overrides the sysfs
+    root and `ethtool` the text source (tests)."""
     root = sysfs or _SYSFS_NET
     links = {}
     try:
@@ -587,17 +683,21 @@ def read_nic_link(interfaces=None, sysfs=None):
         links[name] = {"speed_mbps": speed,
                        "duplex": duplex if duplex in ("full", "half") else None,
                        "operstate": oper}
+        if speed is not None:
+            links[name].update(_link_expectation(name, ethtool))
     return links
 
 
 def collect_nic_link(interfaces=None):
     """Host NIC link-speed summary for the health record.
 
-    `nic_link` is the per-interface detail; `nic_link_speed_mbps` is the SLOWEST
-    negotiated rate among the watched wired links (the alert signal -- one bad
-    cable on a two-NIC box is still a bad cable); `nic_link_duplex` is the duplex
-    of that slowest link. Interfaces with no wired link (wifi, down) are excluded
-    from the summary but kept in the detail."""
+    `nic_link` is the per-interface detail (negotiated speed/duplex plus what the
+    link partner advertised and the resulting `expected_mbps`); `nic_link_speed_mbps`
+    is the SLOWEST negotiated rate among the watched wired links; `nic_link_duplex`
+    is the duplex of that slowest link. Interfaces with no wired link (wifi, down)
+    are excluded from the summary but kept in the detail. `nic_link_note` says
+    when a wired link's partner advertisement could not be read (no ethtool, or a
+    driver that doesn't report it) -- the reason the auto rule stays silent."""
     links = read_nic_link(interfaces)
     wired = {n: l for n, l in links.items() if l["speed_mbps"] is not None}
     result = {"nic_link": links or None, "nic_link_speed_mbps": None, "nic_link_duplex": None}
@@ -605,6 +705,11 @@ def collect_nic_link(interfaces=None):
         slowest = min(wired, key=lambda n: wired[n]["speed_mbps"])
         result["nic_link_speed_mbps"] = wired[slowest]["speed_mbps"]
         result["nic_link_duplex"] = wired[slowest]["duplex"]
+        unknown = sorted(n for n, l in wired.items() if l.get("expected_mbps") is None)
+        if unknown:
+            result["nic_link_note"] = ("link partner advertisement not readable on %s "
+                                       "(ethtool missing or driver does not report it)"
+                                       % ", ".join(unknown))
     return result
 
 

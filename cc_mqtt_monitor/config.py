@@ -246,13 +246,18 @@ class Thresholds:
     # wire/NIC or fragmentation. 0 = any increase counts (like udp_rcvbuf).
     nic_rx_errors_per_min_warn: float = 0.0
     ip_reasm_fails_per_min_warn: float = 0.0
-    # Negotiated link speed (Mb/s, from /sys/class/net/<if>/speed) the camera-
-    # facing wired NIC(s) must be AT LEAST. A gigabit NIC that has dropped to
-    # 100 (or 10) has almost always hit a damaged cable, a bad crimp/patch panel,
-    # a flaky switch port or failed auto-negotiation -- the physical faults the
-    # error counters only show once packets are actually lost. Set 100 on a host
-    # whose NIC is genuinely Fast-Ethernet (Pi 3, old boards); 0 disables.
-    nic_link_speed_min_mbps: int = 1000
+    # What the camera-facing wired NIC(s) must have negotiated (Mb/s, from
+    # /sys/class/net/<if>/speed). "auto" (default) judges each link against what
+    # its LINK PARTNER advertised (ethtool): a gigabit switch port offering
+    # 1000baseT while the link sits at 100 (or 10) is a damaged cable, bad
+    # crimp/patch panel, flaky port or failed auto-neg -- the physical faults the
+    # error counters only show once packets are actually lost -- whereas a camera
+    # cabled straight to the host or a Fast-Ethernet switch offers 100 at most, so
+    # 100 there is right and stays quiet. No topology knowledge needed. When the
+    # advertisement can't be read (no ethtool, driver doesn't report it) auto is
+    # silent. A number is a hard floor instead (e.g. 1000 on a box known to sit
+    # on a gigabit switch, 100 on a Pi 3); 0 disables. Half duplex always fires.
+    nic_link_speed_min_mbps: object = "auto"   # "auto" | Mb/s floor | 0
     # Decoder-error / pipeline-reconnect counts in the scanned log tail that mark
     # in-pipeline corruption (the symptom of packets lost upstream of decode).
     decoder_errors_warn: int = 1

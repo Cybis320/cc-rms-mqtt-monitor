@@ -126,11 +126,17 @@ Distinguish the two `health` shapes by payload:
   is a degraded advisory that ages out after `unclean_shutdown_recent_s` (24 h); the field
   itself stays for the whole boot. Fires AFTER the `booting` maintenance window, so it is
   the one notification a station sends about an outage it has already recovered from.
-- `nic_link` — `{iface: {speed_mbps, duplex, operstate}}` for the camera-facing NIC(s)
-  (from sysfs; `speed_mbps`/`duplex` null on wifi or a down link) + `nic_link_speed_mbps`
-  / `nic_link_duplex` — the SLOWEST watched wired link. A `nic_link_slow` problem
-  (degraded) means a gigabit port has negotiated down (typically 100 Mb/s): a cable /
-  switch-port fault caught before packets are lost. Host-wide; route like any host alert.
+- `nic_link` — `{iface: {speed_mbps, duplex, operstate, expected_mbps, partner_max_mbps,
+  supported_max_mbps, partner_autoneg}}` for the camera-facing NIC(s) (speed/duplex from
+  sysfs, null on wifi or a down link; the rest from `ethtool`, only on links with a
+  speed). `expected_mbps` = min(local supported, partner advertised) — what the link
+  SHOULD have negotiated — null when the advertisement isn't readable (then
+  `nic_link_note` says which interfaces and why). Plus `nic_link_speed_mbps` /
+  `nic_link_duplex` — the SLOWEST watched wired link. A `nic_link_slow` problem (degraded)
+  means a link negotiated below what its partner offered (typically 100 Mb/s on a gigabit
+  switch port) or came up half-duplex: a cable / switch-port fault caught before packets
+  are lost. A camera on a direct cable or a 100 Mb switch negotiating 100 is correct and
+  does not fire. Host-wide; route like any host alert.
 - *UDP-only (present when a station uses `protocol: udp`):* `udp_rcvbuf_errors`
   (cumulative), `udp_rcvbuf_errors_per_min` (growth rate — the alert signal),
   `udp_rcvbuf_error_pct`, `udp_in_datagrams`, `udp_rmem_max`. A
