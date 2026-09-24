@@ -66,6 +66,35 @@ def test_actionable_still_alerts():
         assert not IGNORE.search(_full(line)), "should still alert: %s" % line
 
 
+def _full_ts(msg):
+    return "2026/09/10 04:32:31-WARNING-" + msg
+
+
+def test_fft_translation_within_limit_is_routine():
+    """Observed live, all inside the 200 px limit -- alignment working as intended."""
+    for msg in ("FFTalign-line:370 - Translation: x = 14.26, y = -39.74 px, limit of 200.00 px",
+                "FFTalign-line:370 - Translation: x = -200.00, y = 41.82 px, limit of 200.00 px",
+                "FFTalign-line:370 - Translation: x = 0.0, y = 0.0 px, limit of 200.00 px"):
+        assert collect._benign_by_value(_full_ts(msg)), msg
+
+
+def test_fft_translation_over_limit_still_alerts():
+    """Over the limit = the camera physically moved further than alignment corrects."""
+    for msg in ("FFTalign-line:370 - Translation: x = 244.89, y = 241.24 px, limit of 200.00 px",
+                "FFTalign-line:370 - Translation: x = -266.02, y = -256.95 px, limit of 200.00 px",
+                "FFTalign-line:370 - Translation: x = 10.0, y = -200.15 px, limit of 200.00 px"):
+        assert not collect._benign_by_value(_full_ts(msg)), msg
+        assert not IGNORE.search(_full_ts(msg)), "the regex list must not mute it either"
+
+
+def test_value_check_leaves_other_warnings_alone():
+    """Unparseable or unrelated -> not benign, so nothing new vanishes by accident."""
+    for msg in ("FFTalign-line:360 - imreg_dft error: The scale correction is too high!",
+                "FFTalign-line:370 - Translation: x = garbage, limit of 200 px",
+                "UploadManager-line:64 - Agent authentication failed. No valid authorized keys found."):
+        assert not collect._benign_by_value(_full_ts(msg)), msg
+
+
 def test_watchdog_detection_is_unaffected():
     """Muting the WATCHDOG line in the log_warning filter must NOT disarm the dedicated
     watchdog check -- that runs off its own regex, which the ignore filter never touches."""

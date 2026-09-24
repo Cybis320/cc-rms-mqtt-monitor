@@ -758,6 +758,31 @@ _DEFAULT_WARNING_IGNORE = [
 ]
 
 
+# FFTalign's frame-alignment report: "Translation: x = 14.26, y = -39.74 px, limit of
+# 200.00 px". RMS logs it at WARNING on every alignment, INSIDE the limit as well as
+# over it -- and a regex cannot compare numbers, so it was either all muted or all
+# alerting. It alerted: ~10/day fleet-wide, the second-largest log_warning source, and
+# almost all of it well within tolerance. Over the limit is a different message in
+# substance: the frame moved further than alignment can correct, i.e. the camera has
+# physically shifted -- that one must keep alerting.
+_FFT_TRANSLATION_RE = re.compile(
+    r"FFTalign.*Translation:\s*x\s*=\s*(-?[\d.]+),\s*y\s*=\s*(-?[\d.]+)\s*px,"
+    r"\s*limit of\s*([\d.]+)")
+
+
+def _benign_by_value(line):
+    """True for a warning that is routine given its NUMBERS (see _FFT_TRANSLATION_RE).
+    Unparseable -> False, so an unfamiliar variant still alerts rather than vanishing."""
+    m = _FFT_TRANSLATION_RE.search(line)
+    if not m:
+        return False
+    try:
+        x, y, limit = (float(v) for v in m.groups())
+    except ValueError:
+        return False
+    return abs(x) <= limit and abs(y) <= limit
+
+
 def _compile_warning_ignore(extra):
     pats = _DEFAULT_WARNING_IGNORE + list(extra or [])
     return re.compile("|".join("(?:%s)" % p for p in pats))
@@ -922,7 +947,7 @@ def collect_logs(station, max_lines, warning_ignore=None, now=None, window_s=Non
 
         # WARNING-level lines that are neither fatal nor a known-benign pattern.
         if (in_window and not is_fatal and _WARNING_RE.search(line)
-                and not ignore_re.search(line)):
+                and not ignore_re.search(line) and not _benign_by_value(line)):
             result["warning_count"] += 1
             result["last_warning"] = redact(line.strip())[:300]
 
