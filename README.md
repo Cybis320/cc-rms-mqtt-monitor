@@ -334,14 +334,18 @@ deploy.
 `config.yaml`, installs + starts the hardened systemd service):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-mqtt-monitor/master/scripts/deploy_station.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-mqtt-monitor/master/install.sh | bash
 ```
+
+(Same one-liner shape as every CC RMS utility; it clones into
+`~/source/CC_Utils/MQTT_monitor` and runs `scripts/deploy_station.sh`. The older
+one-liner that curled `scripts/deploy_station.sh` directly still works.)
 
 It defaults to `mqtt.contrailcast.com:1883` (plaintext) with **no credentials** —
 nothing for the operator to configure. The health feed is non-sensitive and
 world-readable by design, so TLS is opt-in (see `deploy/README.md`); enable it
 only alongside authentication. Override the repo with
-`CC_REPO_URL=… bash deploy_station.sh` if you fork it.
+`CC_REPO_URL=… bash install.sh` if you fork it.
 
 > **Opting out:** the monitor honors your RMS `weblog_enable` setting. Any camera
 > with `weblog_enable: false` is **not transmitted** to MQTT at all (and a host
