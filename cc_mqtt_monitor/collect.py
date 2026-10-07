@@ -699,6 +699,12 @@ _DEFAULT_WARNING_IGNORE = [
                                   # used to encode stars_recent as ">cap"
     r"Could not record media_backend in observation summary",  # summary-lock race; capture continues
     r"(?:Runtime|Optimize|User|Deprecation|Future|Pending)Warning:",  # numpy/scipy/py warnings
+    # astropy shortening an over-long FITS header COMMENT ("Card is too long, comment will be
+    # truncated"): cosmetic -- the keyword and value are written intact, only the comment
+    # text is cut. Arrived on all six CAWEC cameras within minutes of each other, i.e. a
+    # header RMS now writes, not a station fault. Narrow on purpose: other VerifyWarnings
+    # can mean a malformed FITS file and must still alert.
+    r"VerifyWarning: Card is too long, comment will be truncated",
     r"alignPlatepar: Fit did not converge",                    # self-recovers to original platepar
     r"Dropped frames timestamp queue exceeded safety limit",   # RMS memory-cap housekeeping;
     # the actual dropping is already covered by the dropped_frames check + drop_cause

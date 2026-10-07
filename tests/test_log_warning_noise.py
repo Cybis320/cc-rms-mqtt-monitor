@@ -17,6 +17,8 @@ from cc_mqtt_monitor import collect                       # noqa: E402
 IGNORE = collect._compile_warning_ignore(None)            # built-in defaults only
 
 MUTED = [
+    # astropy shortening a FITS header comment -- cosmetic, observed on all CAWEC cams
+    "Logger-line:99 - : VerifyWarning: Card is too long, comment will be truncated. [astropy.io.fits.card]",
     # capture teardown at day<->night switches / reconnects -- RMS recovers and continues
     "BufferedCapture-line:1658 - releaseResources: cap.release() hung - fd dropped",
     "BufferedCapture-line:1671 - releaseResources: set_state(NULL) did not return within 5s - abandoning teardown",
@@ -36,6 +38,8 @@ MUTED = [
 ]
 
 KEPT = [
+    # a DIFFERENT VerifyWarning can mean a malformed FITS file -- must still alert
+    "Logger-line:99 - : VerifyWarning: Error validating header for HDU #0 (note: astropy uses zero-based indexing).",
     # a box that cannot reboot itself is a real problem (and pairs with the OOM advisory)
     "StartCapture-line:640 - Reboot failed after 6 hours of attempts, resuming capture",
     # a write failure can mean the disk is going -- never muted with the teardown chatter
