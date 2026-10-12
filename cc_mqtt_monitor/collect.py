@@ -1160,6 +1160,72 @@ def collect_journal_fatal(station, main_pid):
             "fatal_source": "journal"}
 
 
+# A camera auto-reboot -- scheduled in the CAMERA's firmware (CameraControl
+# setAutoReboot), so RMS's config cannot tell us when -- drops the RTSP stream once a day
+# at the same clock time. Counted as a disconnect, it put an amber "fault" badge on every
+# camera daily. Its signature is the timing: a disconnect at the same time of day as one
+# on a previous day. Tolerance absorbs reconnect jitter; a DST change shifts the camera's
+# clock-based schedule by an hour and will read as unplanned for that one day.
+_SCHED_TOL_S = 20 * 60            # same time of day within +-20 min
+_SCHED_BURST_S = 10 * 60          # several drops this close together are ONE reboot
+_DISC_HISTORY_S = 4 * 86400       # how far back "a previous day" may be
+
+
+def classify_disconnects(session_ts, history_ts):
+    """Split this session's disconnects into (scheduled, unplanned).
+
+    `session_ts`: epoch seconds of this session's disconnects. `history_ts`: disconnects
+    seen on EARLIER days. A disconnect is scheduled when some earlier one fell at the same
+    time of day (k x 24 h apart, k >= 1, within _SCHED_TOL_S); drops within _SCHED_BURST_S
+    of a scheduled one share its verdict (one reboot can need more than one reconnect).
+    The first occurrence ever has no predecessor and is honestly unplanned -- the pattern
+    only exists from the second day."""
+    sched = set()
+    for i, t in enumerate(session_ts):
+        for p in history_ts:
+            gap = t - p
+            if gap < 86400 - _SCHED_TOL_S:
+                continue
+            off = gap % 86400
+            if min(off, 86400 - off) <= _SCHED_TOL_S:
+                sched.add(i)
+                break
+    for i, t in enumerate(session_ts):              # spread to the rest of the burst
+        if i not in sched and any(abs(t - session_ts[j]) <= _SCHED_BURST_S for j in sched):
+            sched.add(i)
+    return len(sched), len(session_ts) - len(sched)
+
+
+def _disc_history(station_id, session_ts, now):
+    """Return earlier-day disconnect times for this station and record this session's.
+
+    Persisted (state_paths) because the log -- and so the evidence of yesterday's reboot
+    -- rotates daily, and a monitor restart must not forget the pattern."""
+    from .config import state_paths
+    paths = state_paths("disconnects_%s.json" % station_id)
+    hist = []
+    for path in paths:
+        try:
+            with open(path) as fh:
+                hist = [float(x) for x in json.load(fh)]
+            break
+        except (IOError, OSError, ValueError, TypeError):
+            continue
+    earlier = [h for h in hist if all(abs(h - t) > 60 for t in session_ts)]
+    merged = sorted({round(x) for x in hist + list(session_ts) if now - x <= _DISC_HISTORY_S})
+    for path in paths:
+        try:
+            d = os.path.dirname(path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(path, "w") as fh:
+                json.dump(merged, fh)
+            break
+        except (IOError, OSError):
+            continue
+    return earlier
+
+
 def collect_capture_events(station, now=None):
     """Capture-stability counts for the CURRENT day/night session.
 
@@ -1197,7 +1263,8 @@ def collect_capture_events(station, now=None):
       processing_age_s          -- seconds since the run's start marker
     All null if the log can't be read. O(1) memory (line-streamed).
     """
-    result = {"disconnects_session": None, "watchdog_restarts_session": None,
+    result = {"disconnects_session": None, "disconnects_scheduled_session": None,
+              "disconnects_unplanned_session": None, "watchdog_restarts_session": None,
               "meteors_session": None, "stars_recent": None,
               "capture_backend": None, "processing_active": None,
               "processing_kind": None, "processing_dir": None,
@@ -1207,6 +1274,7 @@ def collect_capture_events(station, now=None):
         return result
     now = now or time.time()
     disc, wd, met, stars, backend = 0, 0, 0, None, None
+    disc_ts = []          # epoch of each disconnect this session (for the schedule test)
     overflow_cap = None   # set by an overflow line; consumed by the next star line
     proc_kind, proc_dir, proc_ts = None, None, None
     data_dir = None       # last session dir logged; the dawn run processes it
@@ -1215,6 +1283,7 @@ def collect_capture_events(station, now=None):
             for line in fh:
                 if _TRANSITION_RE.search(line):
                     disc, wd, met = 0, 0, 0      # new session -> reset (as RMS does)
+                    disc_ts = []
                     continue
                 # Post-processing episode boundaries. End first: a line can't be
                 # both, and the reprocess error line contains "reprocess" too.
@@ -1247,6 +1316,9 @@ def collect_capture_events(station, now=None):
                     continue
                 if _DISCONNECT_RE.search(line):
                     disc += 1
+                    t = _parse_log_ts(line)
+                    if t is not None:
+                        disc_ts.append(t)
                     continue
                 m = _WD_RESTART_RE.search(line)
                 if m:
@@ -1269,7 +1341,13 @@ def collect_capture_events(station, now=None):
                     overflow_cap = None   # consumed
     except (IOError, OSError):
         return result
-    result["disconnects_session"] = disc
+    result["disconnects_session"] = disc      # unchanged meaning: trend history stays comparable
+    sid = getattr(station, "station_id", None)
+    sched, unpl = classify_disconnects(disc_ts, _disc_history(sid, disc_ts, now) if sid else [])
+    # untimestamped drops (rare) can't be judged -> count them as unplanned, never hide them
+    unpl += disc - len(disc_ts)
+    result["disconnects_scheduled_session"] = sched
+    result["disconnects_unplanned_session"] = unpl
     result["watchdog_restarts_session"] = wd
     result["meteors_session"] = met
     result["stars_recent"] = stars
