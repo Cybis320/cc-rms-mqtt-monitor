@@ -17,6 +17,11 @@ from cc_mqtt_monitor import collect                       # noqa: E402
 IGNORE = collect._compile_warning_ignore(None)            # built-in defaults only
 
 MUTED = [
+    # the RTSP source (rtspsrc name=src) losing its camera socket -- every scheduled
+    # camera auto-reboot produces these; real drops are caught by dedicated checks
+    "BufferedCapture-line:1514 - GST WARN from src: gst-resource-error-quark: Could not read from resource. (9)",
+    "BufferedCapture-line:900 - GST WARN  from src: gst-resource-error-quark: Could not read from resource. (9)",
+    "BufferedCapture-line:900 - GST WARN  from src: gst-resource-error-quark: Could not write to resource. (9)",
     # astropy shortening a FITS header comment -- cosmetic, observed on all CAWEC cams
     "Logger-line:99 - : VerifyWarning: Card is too long, comment will be truncated. [astropy.io.fits.card]",
     # capture teardown at day<->night switches / reconnects -- RMS recovers and continues
@@ -42,9 +47,10 @@ KEPT = [
     "Logger-line:99 - : VerifyWarning: Error validating header for HDU #0 (note: astropy uses zero-based indexing).",
     # a box that cannot reboot itself is a real problem (and pairs with the OOM advisory)
     "StartCapture-line:640 - Reboot failed after 6 hours of attempts, resuming capture",
-    # a write failure can mean the disk is going -- never muted with the teardown chatter
-    "BufferedCapture-line:900 - GST WARN  from src: gst-resource-error-quark: Could not write to resource. (9)",
-    "BufferedCapture-line:900 - GST WARN  from src: gst-resource-error-quark: Could not read from resource. (9)",
+    # the same GST resource error from an element OTHER than the RTSP source must still alert
+    "BufferedCapture-line:900 - GST WARN  from sink: gst-resource-error-quark: Could not write to resource. (9)",
+    # a pipeline that fails to build is a real fault, not a camera reboot
+    "BufferedCapture-line:900 - GST WARN  from src: gst_parse_error: Delayed linking failed. (2)",
     # upload config faults stay actionable
     "UploadManager-line:64 - Agent authentication failed. No valid authorized keys found.",
     "UploadManager-line:70 - SSH error with provided key: encountered RSA key, expected OPENSSH key",

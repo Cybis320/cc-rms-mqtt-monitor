@@ -737,8 +737,16 @@ _DEFAULT_WARNING_IGNORE = [
     r"releaseResources: cap\.release\(\) hung",
     r"releaseResources: set_state\(NULL\) did not return",
     r"RawFrameSaver still busy\. Terminating",
-    # NOTE the GST "Could not write/read to resource" warnings are deliberately NOT muted --
-    # a write failure can mean the disk is going.
+    # GStreamer's RTSP source losing its socket to the camera. "from src" names the element:
+    # RMS builds the pipeline with `rtspsrc name=src`, so "Could not read from / write to
+    # resource" here is the camera's NETWORK connection, not the disk. (These were kept in
+    # July on the belief that a write failure could mean a failing disk -- it cannot from
+    # this element; disk failure is caught by disk_errors from the kernel log and by the
+    # read-only-filesystem check.) Every scheduled camera auto-reboot produces one, so they
+    # alerted on normal operation; a REAL drop is still caught by camera_unreachable,
+    # capture_stalled and disconnects_session. Anchored to "from src" so the same error from
+    # any other element (e.g. a file sink) still alerts.
+    r"GST WARN\s+from src: gst-resource-error-quark: Could not (?:read from|write to) resource",
 
     # --- Watchdog force-terminate line (DUPLICATE) -------------------------
     # The dedicated `watchdog` check already reports this incident, from its own
